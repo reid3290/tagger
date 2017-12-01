@@ -88,10 +88,14 @@ if args.action == 'train':
     dev_file = args.dev
     model_file = args.model
     print 'Reading data......'
+
+    # 统计文本信息
     if args.ngram > 1 and not os.path.isfile(path + '/' + str(args.ngram) + 'gram.txt') or (not os.path.isfile(path + '/' + 'chars.txt')):
         toolbox.get_vocab_tag(path, [train_file, dev_file], ngram=args.ngram)
+    # 读取文本信息
     chars, tags, ngram = toolbox.read_vocab_tag(path, args.ngram)
 
+    # 读取预训练字向量
     emb = None
     emb_dim = args.embeddings_dimension
     if args.word_vector:
@@ -107,11 +111,13 @@ if args.action == 'train':
     else:
         assert args.pixels
 
+    # 读取偏旁部首信息
     rad_dic = None
     if args.radical:
         print 'Using Radical dictionary...'
         rad_dic = toolbox.get_radical_dic()
 
+    # 读取字符图像信息
     pixels = None
     if args.pixels:
         print 'Reading characters as pixels...'
@@ -125,6 +131,8 @@ if args.action == 'train':
     train_x, train_y, train_max_slen_c, train_max_slen_w, train_max_wlen = toolbox.get_input_vec(path, train_file, char2idx, tag2idx, rad_dic=rad_dic, tag_scheme=args.tag_scheme)
     dev_x, dev_y, dev_max_slen_c, dev_max_slen_w, dev_max_wlen = toolbox.get_input_vec(path, dev_file, char2idx, tag2idx, rad_dic=rad_dic, tag_scheme=args.tag_scheme)
 
+
+    # 读取 ngram 向量
     nums_grams = None
     ng_embs = None
 
@@ -160,18 +168,22 @@ if args.action == 'train':
     b_dev_x, b_dev_y = toolbox.buckets(dev_x, dev_y, size=args.bucket_size)
 
     b_train_x, b_train_y, b_buckets, b_counts = toolbox.pad_bucket(b_train_x, b_train_y)
-
+    # b_buckets：每一个 bucket 中句子的长度（已经对齐过，bucket 中所有句子的长度一致）
+    # b_counts：每一个 bucket 中句子的个数
     b_dev_x, b_dev_y, b_buckets, _ = toolbox.pad_bucket(b_dev_x, b_dev_y, bucket_len_c=b_buckets)
 
     print 'Training set: %d instances; Dev set: %d instances.' % (len(train_x[0]), len(dev_x[0]))
 
     nums_tags = toolbox.get_nums_tags(tag2idx, args.tag_scheme)
-
+    # 用来对session进行参数配置，allow_soft_placement 表示如果你指定的设备不存在，允许TF自动分配设备
     config = tf.ConfigProto(allow_soft_placement=True)
     gpu_config = "/gpu:" + str(args.gpu)
     print 'Initialization....'
     t = time()
+    # Returns an initializer performing "Xavier" initialization for weights.
+    # This initializer is designed to keep the scale of the gradients roughly the same in all layers
     initializer = tf.contrib.layers.xavier_initializer()
+    # Returns a context manager that makes this Graph the default graph
     main_graph = tf.Graph()
     with main_graph.as_default():
         with tf.variable_scope("tagger", reuse=None, initializer=initializer) as scope:
@@ -181,7 +193,7 @@ if args.action == 'train':
         t = time()
         model.config(optimizer=args.optimizer, decay=args.decay_rate, lr_v=args.learning_rate, momentum=args.momentum, clipping=args.clipping)
         init = tf.global_variables_initializer()
-
+    # Finalizes this graph, making it read-only.
     main_graph.finalize()
 
     main_sess = tf.Session(config=config, graph=main_graph)
@@ -199,6 +211,7 @@ if args.action == 'train':
     else:
         sess = [main_sess]
 
+    # A context manager that specifies the default device to use for newly created ops
     with tf.device(gpu_config):
         main_sess.run(init)
         print 'Done. Time consumed: %d seconds' % int(time() - t)

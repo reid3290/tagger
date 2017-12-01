@@ -14,9 +14,13 @@ import math
 class Model(object):
 
     def __init__(self, nums_chars, nums_tags, buckets_char, counts=None, pic_size=None, font=None, batch_size=10, tag_scheme='BIES', word_vec=True, radical=False, graphic=False, crf=1, ngram=None, metric='F1-score'):
+        # 字符种类数目
         self.nums_chars = nums_chars
+        # 标签种类数目
         self.nums_tags = nums_tags
+        # 每个 bucket 中句子的长度
         self.buckets_char = buckets_char
+        # 训练集中每个 bucket 中的句子个数
         self.counts = counts
         self.tag_scheme = tag_scheme
         self.graphic = graphic
@@ -61,6 +65,9 @@ class Model(object):
         while len(self.buckets_char) > len(self.counts):
             self.counts.append(1)
 
+        # 获取每一个 batch 的大小
+        # 一个 bucket 就是一个 batch，如果 bucket 中句子的个数小于设定的 batch_size，则对应 batch 的大小就是 bucket 中的句子个数，否则是 batch_size。
+        # 即限制了 batch 最大为 batch_size
         self.real_batches = toolbox.get_real_batch(self.counts, self.batch_size)
 
     def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, rad_dim=30, emb=None, ng_embs=None, pixels=None, con_width=None, filters=None, pooling_size=None):
@@ -103,9 +110,17 @@ class Model(object):
         self.drop_out = dr
         self.drop_out_v = drop_out
 
+        # 字向量层
+        # 为什么字符数要加 500 ？
+        # emd_dim 是每个字符的特征向量维度，可以通过命令行参数设置
+        # weights 表示预训练的字向量，可以通过命令行参数设置
         if self.word_vec:
             self.emb_layer = EmbeddingLayer(self.nums_chars + 500, emb_dim, weights=emb, name='emb_layer')
 
+        # 偏旁部首向量
+        # 依照《康熙字典》，共有 214 个偏旁部首。
+        # 只用了常见汉字的偏旁部首，非常见汉字和非汉字的偏旁部首用其他两个特殊符号代替，
+        # 所以共有 216 个偏旁部首
         if self.radical:
             self.radical_layer = EmbeddingLayer(216, rad_dim, name='radical_layer')
 
@@ -120,6 +135,7 @@ class Model(object):
         wrapper_conv_1, wrapper_mp_1, wrapper_conv_2, wrapper_mp_2, wrapper_dense, wrapper_dr = None, None, None, None, None, None
 
         if self.graphic:
+            # 使用图像信息，需要用到 CNN
             self.input_p = []
             assert pixels is not None and filters is not None and pooling_size is not None and con_width is not None
 
@@ -152,6 +168,8 @@ class Model(object):
                 fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([fw_rnn_cell]*rnn_num, state_is_tuple=True)
                 bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([bw_rnn_cell]*rnn_num, state_is_tuple=True)
 
+        # 隐层层，输入是前向 RNN 的输出加上 后向 RNN 的输出，所以输入维度为 rnn_dim * 2
+        # 输出维度即标签个数
         output_wrapper = TimeDistributed(HiddenLayer(rnn_dim * 2, self.nums_tags[0], activation='linear', name='hidden'), name='wrapper')
 
         #define model for each bucket

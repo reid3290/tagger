@@ -15,6 +15,8 @@ from evaluation import score, score_boundaries
 sys.stdout = codecs.getwriter('utf8')(sys.stdout)
 
 
+# 给定文本，统计其 ngram 并返回
+# 只统计了有哪些 ngram，没有统计对应的出现次数
 def get_ngrams(raw, gram):
     gram_set = set()
     li = gram/2
@@ -34,25 +36,26 @@ def get_ngrams(raw, gram):
             gram_set.add(ch)
     return gram_set
 
-
+# 读取训练集和开发集中的文本信息：字符、标签、ngram，然后写入相关文件供后续使用
 def get_vocab_tag(path, filelist, ngram=1):
     out_char = codecs.open(path + '/chars.txt', 'w', encoding='utf-8')
     out_tag = codecs.open(path + '/tags.txt', 'w', encoding='utf-8')
     char_set = set()
     tag_set = {}
-    raw = []
+    raw = [] # 每一行对应开发集或测试集中的一行，但是是去掉词性标签和空格的原始文本，用于统计 ngram 
     for file_name in filelist:
         for line in codecs.open(path + '/' + file_name, 'rb', encoding='utf-8'):
             line = line.strip()
             raw_l = ''
-            sets = line.split(' ')
+            sets = line.split(' ') # 训练集和开发集中词和词之间是用空格分开的
             if len(sets) > 0:
                 for seg in sets:
-                    spos = seg.split('_')
+                    spos = seg.split('_') # 词语和其词性标签之间是用 _ 连接的
                     if len(spos) == 2:
                         for ch in spos[0]:
                             char_set.add(ch)
                             raw_l += ch
+                        # 记录词性标签及其对应的最长的词的长度
                         if spos[1] in tag_set:
                             if tag_set[spos[1]] < len(spos[0]):
                                 tag_set[spos[1]] = len(spos[0])
@@ -65,7 +68,6 @@ def get_vocab_tag(path, filelist, ngram=1):
                 print line
                 raise Exception('Check your text file.')
     char_set = list(char_set)
-    #tag_set = list(tag_set)
     if ngram > 1:
         for i in range(2, ngram + 1):
             out_gram = codecs.open(path + '/' + str(i) + 'gram.txt', 'w', encoding='utf-8')
@@ -505,6 +507,7 @@ def viterbi(max_scores, max_scores_pre, length, batch_size):
     return best_paths
 
 
+# 这个函数就是实现论文中的 tagging scheme，旨在减少组合标签的总数量，降低 Viterbi 算法的复杂度
 def get_comb_tags(tags, tag_type):
     tag2index = {}
     tag2index['<P>'] = 0
@@ -545,7 +548,8 @@ def get_dic(chars, tags):
         index2tag[dic_keys] = {v: k for k, v in tag2index[dic_keys].items()}
     return char2index, index2char, tag2index, index2tag
 
-
+# 将 ngram 映射成对应的数字序号
+# 输入是二维数组 [[2grams],[3grams],......]
 def get_ngram_dic(ngrams):
     gram_dics = []
     for i, gram in enumerate(ngrams):
@@ -628,6 +632,8 @@ def get_input_vec(path, fname, char2index, tag2index, rad_dic=None, tag_scheme='
         if len(segs) > 0 and len(line) > 0:
             for seg in segs:
                 splits = seg.split('_')
+                if len(splits) != 2:
+                    print(seg)
                 assert len(splits) == 2
 
                 w_len = len(splits[0])
@@ -715,7 +721,6 @@ def gram_vec(raw, dic):
                 indices.append(dic['<UNK>'])
         out.append(indices)
     return out
-
 
 def get_gram_vec(path, fname, gram2index, is_raw=False):
     raw = []
@@ -875,7 +880,8 @@ def trim_output(out, length):
         trimmed_out.append(item[:l])
     return trimmed_out
 
-
+# 获取所有组合标签的个数
+# 为什么要以数组的形式返回呢？
 def get_nums_tags(tag2idx, tag_scheme):
     nums_tags = [len(tag2idx[tag_scheme])]
     return nums_tags
@@ -940,8 +946,7 @@ def printer(predictions, out_path):
     for line in predictions:
         fout.write(line + '\n')
     fout.close()
-
-
+# 将句子按字符串长度排序，置入多个 buckets 中去，每一个 bucket 中的句子之间的长度差不超过 size
 def buckets(x, y, size=10):
     assert len(x[0]) == len(y[0])
     num_inputs = len(x)
@@ -965,7 +970,11 @@ def buckets(x, y, size=10):
 
     return bucks[:num_inputs], bucks[num_inputs:]
 
-
+# 原始输入通过上面一个函数放到了 buckets 中，本函数将每个 bucket 中的句子对齐
+# （取当前 bucket 中最长的那句的长度作为 bucket 的长度，其他较短的句子在后面补0）
+# 最终使得每个 bucket 中的句子长度一致
+# 另外，对于开发集，除非当前 bucket 中的句子长度超过了训练集中所有 buckets 的长度，
+# 否则取训练集中长度大于等于当前 bucket 的 bucket 的长度目标作为最大长度，这一逻辑作用不清楚
 def pad_bucket(x, y, bucket_len_c=None):
     assert len(x[0]) == len(y[0])
     num_inputs = len(x)

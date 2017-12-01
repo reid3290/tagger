@@ -3,6 +3,7 @@ import tensorflow as tf
 import numpy as np
 import math
 
+# 隐藏层，或者叫全连接层，即计算 activation(Wx+b) 的一层 
 class HiddenLayer(object):
     """
     Hidden layer with or without bias.
@@ -95,6 +96,7 @@ class EmbeddingLayer(object):
         self.params = [self.embeddings]
         self.weight_name = self.name + '_emb'
 
+    # 获取指定位置的向量，即 look up 操作
     def __call__(self, input_t):
         """
         return the embeddings of the given indexes

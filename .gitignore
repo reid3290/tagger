@@ -1,0 +1,14 @@
+.idea/
+2gram.txt
+3gram.txt
+chars.txt
+checkpoint
+glove_sub.txt
+model_ud1_model
+model_ud1_weights.data-00000-of-00001
+model_ud1_weights.index
+output.txt
+tags.txt
+ud1_model
+*.pyc
+test-corpus/
