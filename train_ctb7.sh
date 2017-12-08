@@ -1,0 +1,1 @@
+nohup python tagger.py train -gpu 1 -p CTB7 -t train.txt -bt 80 -d dev.txt -wv -cp -rd -gru -m CTB7 -emb Embeddings/glove.txt > train_ctb7.log &

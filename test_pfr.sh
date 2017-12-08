@@ -1,0 +1,1 @@
+nohup python tagger.py test -p PFR -e test.txt -m PFR -emb Embeddings/glove.txt > test_pfr.log
