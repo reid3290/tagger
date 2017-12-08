@@ -388,7 +388,7 @@ else:
                 raw_x[k] = toolbox.pad_zeros(raw_x[k], max_step)
 
     config = tf.ConfigProto(allow_soft_placement=True)
-    gpu_config = "/gpu:" + str(args.gpu)
+    gpu_config = "/device:GPU:" + str(args.gpu)
     print 'Initialization....'
     t = time()
     main_graph = tf.Graph()
