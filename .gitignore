@@ -4,11 +4,10 @@
 chars.txt
 checkpoint
 glove_sub.txt
-model_ud1_model
-model_ud1_weights.data-00000-of-00001
-model_ud1_weights.index
+*_model
+*_weights.data-00000-of-00001
+*_weights.index
 output.txt
 tags.txt
-ud1_model
 *.pyc
 test-corpus/
