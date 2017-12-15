@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import division
 import tensorflow as tf
 from layers import EmbeddingLayer, BiLSTM, HiddenLayer, TimeDistributed, DropoutLayer, Convolution, Maxpooling, Forward
 from time import time
@@ -12,9 +13,10 @@ import math
 
 
 class Model(object):
-
-    def __init__(self, nums_chars, nums_tags, buckets_char, counts=None, pic_size=None, font=None, batch_size=10,
+    def __init__(self, window_size, filters_number, nums_chars, nums_tags, buckets_char, counts=None, pic_size=None, font=None, batch_size=10,
                  tag_scheme='BIES', word_vec=True, radical=False, graphic=False, crf=1, ngram=None, metric='F1-score'):
+        self.window_size = window_size
+        self.filters_number = filters_number
         # 字符种类数目
         self.nums_chars = nums_chars
         # 标签种类数目，例如[18]，至于为什么要用数组多此一举不清楚
@@ -27,6 +29,7 @@ class Model(object):
         self.graphic = graphic
         self.word_vec = word_vec
         self.radical = radical
+        # 默认为1，即使用一阶条件随机场
         self.crf = crf
         self.ngram = ngram
         self.emb_layer = None
@@ -47,10 +50,13 @@ class Model(object):
         self.metric = metric
         self.updates = []
         self.bucket_dit = {}
+        # shape = (bucket数量，每个 bucket 中的句子数量，句子长度)
         self.input_v = []
         self.input_w = []
         self.input_p = None
+        # LSTM 经全连接后的输出
         self.output = []
+        # 标签，ground truth
         self.output_ = []
         self.output_p = []
         self.output_w = []
@@ -128,7 +134,8 @@ class Model(object):
             else:
                 ng_embs = [None for _ in range(len(self.ngram))]
             for i, n_gram in enumerate(self.ngram):
-                self.gram_layers.append(EmbeddingLayer(n_gram + 1000 * (i + 2), emb_dim, weights=ng_embs[i], name=str(i + 2) + 'gram_layer'))
+                self.gram_layers.append(EmbeddingLayer(n_gram + 1000 * (i + 2), emb_dim, weights=ng_embs[i],
+                                                       name=str(i + 2) + 'gram_layer'))
 
         wrapper_conv_1, wrapper_mp_1, wrapper_conv_2, wrapper_mp_2, wrapper_dense, wrapper_dr = \
             None, None, None, None, None, None
@@ -151,7 +158,8 @@ class Model(object):
 
             p_size_2 = toolbox.down_pool(p_size_1, pooling_size)
 
-            wrapper_dense = TimeDistributed(HiddenLayer(p_size_2 * p_size_2 * filters, 100, activation='tanh', name='conv_dense'), name='wrapper_3')
+            wrapper_dense = TimeDistributed(
+                HiddenLayer(p_size_2 * p_size_2 * filters, 100, activation='tanh', name='conv_dense'), name='wrapper_3')
             wrapper_dr = TimeDistributed(DropoutLayer(self.drop_out), name='wrapper_dr')
 
         with tf.variable_scope('BiRNN'):
@@ -164,8 +172,8 @@ class Model(object):
                 bw_rnn_cell = tf.nn.rnn_cell.LSTMCell(rnn_dim, state_is_tuple=True)
 
             if rnn_num > 1:
-                fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([fw_rnn_cell]*rnn_num, state_is_tuple=True)
-                bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([bw_rnn_cell]*rnn_num, state_is_tuple=True)
+                fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([fw_rnn_cell] * rnn_num, state_is_tuple=True)
+                bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([bw_rnn_cell] * rnn_num, state_is_tuple=True)
 
         # 隐藏层，输入是前向 RNN 的输出加上 后向 RNN 的输出，所以输入维度为 rnn_dim * 2
         # 输出维度即标签个数
@@ -182,6 +190,7 @@ class Model(object):
             t1 = time()
 
             # 输入的句子，one-hot 向量
+            # shape = （batch_size, 句子长度）
             input_v = tf.placeholder(tf.int32, [None, bucket], name='input_' + str(bucket))
 
             self.input_v.append([input_v])
@@ -209,7 +218,7 @@ class Model(object):
                     emb_set.append(gram_out)
 
             if self.graphic:
-                input_p = tf.placeholder(tf.float32, [None, bucket, pixel_dim*pixel_dim])
+                input_p = tf.placeholder(tf.float32, [None, bucket, pixel_dim * pixel_dim])
                 self.input_p.append(input_p)
 
                 pix_out = tf.reshape(input_p, [-1, bucket, pixel_dim, pixel_dim, 1])
@@ -237,13 +246,42 @@ class Model(object):
             else:
                 emb_out = emb_set[0]
 
-            #  rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
+            if self.window_size > 1:
+
+                padding_size = int(np.floor(self.window_size / 2))
+                word_padded = tf.pad(word_out, [[0, 0], [padding_size, padding_size], [0, 0]], 'CONSTANT')
+
+                Ws = []
+                for q in range(1, self.window_size + 1):
+                    Ws.append(tf.Variable(tf.truncated_normal([q * emb_dim, self.filters_number], stddev=0.1), name="W_%d" % q))
+                b = tf.Variable(tf.constant(0.1, shape=[self.filters_number]), name="b")
+
+                z = [None for _ in range(0, bucket)]
+
+                for q in range(1, self.window_size + 1):
+                    for i in range(padding_size, bucket + padding_size):
+                        low = i - int(np.floor((q - 1) / 2))
+                        high = i + int(np.ceil((q + 1) / 2))
+                        x = word_padded[:, low, :]
+                        for j in range(low + 1, high):
+                            x = tf.concat(values=[x, word_padded[:, j, :]], axis=1)
+                        z_iq = tf.tanh(tf.nn.xw_plus_b(x, Ws[q - 1], b))
+                        if z[i - padding_size] is None:
+                            z[i - padding_size] = z_iq
+                        else:
+                            z[i - padding_size] = tf.concat([z[i - padding_size], z_iq], axis=1)
+
+                z = tf.stack(z, axis=1)
+                values, indices = tf.nn.top_k(z, sorted=False, k=emb_dim)
+                emb_out = values
+
+            # rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
             rnn_out = BiLSTM(rnn_dim, fw_cell=fw_rnn_cell, bw_cell=bw_rnn_cell, p=dr,
                              name='BiLSTM' + str(bucket), scope='BiRNN')(emb_out, input_v)
 
             # 应用全连接层，Wx+b 得到最后的输出
             output = output_wrapper(rnn_out)
-
+            # 为什么要 [output] 而不是 output 呢？
             self.output.append([output])
 
             self.output_.append([tf.placeholder(tf.int32, [None, bucket], name='tags' + str(bucket))])
@@ -263,6 +301,15 @@ class Model(object):
 
     def config(self, optimizer, decay, lr_v=None, momentum=None, clipping=False, max_gradient_norm=5.0):
 
+        """
+
+        :param optimizer: 优化函数，Adagrad
+        :param decay: 学习率衰减率，0.05
+        :param lr_v:  学习率，0.1
+        :param momentum:
+        :param clipping: 是否运用梯度裁剪（给梯度设置最大阈值）
+        :param max_gradient_norm:
+        """
         self.decay = decay
         print 'Training preparation...'
 
@@ -270,7 +317,9 @@ class Model(object):
         loss = []
         if self.crf > 0:
             loss_function = losses.crf_loss
+
             for i in range(len(self.input_v)):
+                # 根据第 i 个 bucket 的输出和 ground truth，用以 CRF 损失函数，计算损失函数值
                 bucket_loss = losses.loss_wrapper(self.output[i], self.output_[i], loss_function,
                                                   transitions=self.transition_char, nums_tags=self.nums_tags,
                                                   batch_size=self.real_batches[i])
@@ -411,7 +460,7 @@ class Model(object):
             t = time()
             # 在 decay_step 轮之后，衰减学习率
             if epoch % decay_step == 0 and decay > 0:
-                lr_r = lr/(1 + decay*(epoch/decay_step))
+                lr_r = lr / (1 + decay * (epoch / decay_step))
             # data_list: shape=(5,bucket 数量，bucket 中句子个数，句子长度)
             data_list = t_x + t_y
             # samples: shape=(bucket 数量，5, bucket 中句子个数，句子长度)，相当于置换了 data_list 中的 shape[0] 和 shape[1]
@@ -500,7 +549,8 @@ class Model(object):
                         best_score[m] = c_score[m]
                         best_seg[m] = c_seg[m]
                         best_pos[m] = c_tag[m]
-                        self.saver.save(sess[0],  trained_model[:pindex] + m + '_' + trained_model[pindex:], write_meta_graph=False)
+                        self.saver.save(sess[0], trained_model[:pindex] + m + '_' + trained_model[pindex:],
+                                        write_meta_graph=False)
 
             elif c_score[metric] > best_score[metric] and epoch > 4:
                 best_epoch[metric] = epoch + 1
@@ -533,7 +583,8 @@ class Model(object):
             new_emb = toolbox.get_new_embeddings(new_chars, emb_dim, emb_path)
             n_emb_sh = new_emb.get_shape().as_list()
             if len(n_emb_sh) > 1:
-                new_emb_weights = tf.concat(axis=0, values=[old_emb_weights[:len(char2idx) - len(new_chars)], new_emb, old_emb_weights[len(char2idx):]])
+                new_emb_weights = tf.concat(axis=0, values=[old_emb_weights[:len(char2idx) - len(new_chars)], new_emb,
+                                                            old_emb_weights[len(char2idx):]])
                 if new_emb_weights.get_shape().as_list()[0] > emb_len:
                     new_emb_weights = new_emb_weights[:emb_len]
                 assign_op = old_emb_weights.assign(new_emb_weights)
@@ -544,7 +595,8 @@ class Model(object):
             ng_emb_dim = old_gram_weights[0].get_shape().as_list()[1]
             new_ng_emb = toolbox.get_new_ng_embeddings(new_grams, ng_emb_dim, ng_emb_path)
             for i in range(len(old_gram_weights)):
-                new_ng_weight = tf.concat(axis=0, values=[old_gram_weights[i][:len(gram2idx[i]) - len(new_grams[i])], new_ng_emb[i], old_gram_weights[i][len(gram2idx[i]):]])
+                new_ng_weight = tf.concat(axis=0, values=[old_gram_weights[i][:len(gram2idx[i]) - len(new_grams[i])],
+                                                          new_ng_emb[i], old_gram_weights[i][len(gram2idx[i]):]])
                 assign_op = old_gram_weights[i].assign(new_ng_weight)
                 self.updates.append(assign_op)
 
@@ -566,7 +618,8 @@ class Model(object):
         if self.graphic:
             pt_holder = self.input_p[0]
 
-        prediction = self.predict(data=t_x, sess=sess, model=self.input_v[0] + self.output[0], index=0, pt_h=pt_holder, pt=self.pixels, ensemble=ensemble, batch_size=batch_size)
+        prediction = self.predict(data=t_x, sess=sess, model=self.input_v[0] + self.output[0], index=0, pt_h=pt_holder,
+                                  pt=self.pixels, ensemble=ensemble, batch_size=batch_size)
         prediction = toolbox.decode_tags(prediction, idx2tag, self.tag_scheme)
         prediction_out = toolbox.generate_output(chars, prediction, self.tag_scheme)
 
@@ -590,7 +643,8 @@ class Model(object):
             final_out = prediction_out[0]
             toolbox.printer(final_out, outpath)
 
-    def tag(self, sess, r_x, idx2tag, idx2char, char2idx, outpath='out.txt', ensemble=None, batch_size=200, large_file=False):
+    def tag(self, sess, r_x, idx2tag, idx2char, char2idx, outpath='out.txt', ensemble=None, batch_size=200,
+            large_file=False):
 
         chars = toolbox.decode_chars(r_x[0], idx2char)
 
@@ -609,7 +663,8 @@ class Model(object):
 
         real_batch = batch_size * 300 / c_len
 
-        prediction = self.predict(data=r_x, sess=sess, model=self.input_v[idx] + self.output[idx], index=idx, pt_h=pt_holder, pt=self.pixels, ensemble=ensemble, batch_size=real_batch)
+        prediction = self.predict(data=r_x, sess=sess, model=self.input_v[idx] + self.output[idx], index=idx,
+                                  pt_h=pt_holder, pt=self.pixels, ensemble=ensemble, batch_size=real_batch)
         prediction = toolbox.decode_tags(prediction, idx2tag, self.tag_scheme)
         prediction_out = toolbox.generate_output(chars, prediction, self.tag_scheme)
 
@@ -647,8 +702,3 @@ class Model(object):
             predictions = Batch.predict(sess=sess[0], model=model, crf=self.crf, argmax=argmax, batch_size=batch_size,
                                         data=data, dr=self.drop_out, ensemble=ensemble, verbose=verbose)
         return predictions
-
-
-
-
-

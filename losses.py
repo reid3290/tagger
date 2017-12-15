@@ -5,11 +5,16 @@ from layers import Forward
 
 
 def cross_entropy(y, y_, nums_tags):
+
     one_hot_y_ = tf.contrib.layers.one_hot_encoding(y_, nums_tags)
     one_hot_y_ = tf.reshape(one_hot_y_, [-1, nums_tags])
     y = tf.reshape(y, [-1, nums_tags])
+    # Computes softmax cross entropy between logits and labels
+    # While the classes are mutually exclusive, their probabilities need not be.
+    # All that is required is that each row of labels is a valid probability distribution
+    # WARNING: This op expects unscaled logits, since it performs a softmax on logits internally for efficiency.
+    # Do not call this op with the output of softmax, as it will produce incorrect results.
     return tf.nn.softmax_cross_entropy_with_logits(logits=y, labels=one_hot_y_)
-    #return tf.reduce_mean(-tf.reduce_sum(y_ * tf.log(y), reduction_indices=[1]))
 
 
 def mean_square(y, y_):
@@ -17,6 +22,10 @@ def mean_square(y, y_):
 
 
 def sparse_cross_entropy(y, y_):
+    # Computes sparse softmax cross entropy between logits and labels
+    # NOTE: For this operation, the probability of a given label is considered exclusive.
+    # That is, soft classes are not allowed, and the labels vector must provide a single
+    # specific index for the true class for each row of logits (each minibatch entry).
     return tf.nn.sparse_softmax_cross_entropy_with_logits(logits=y, labels=y_)
 
 
@@ -66,7 +75,17 @@ def sequence_loss_by_example(logits, targets, weights=None, average_across_times
 
 
 def crf_loss(y, y_, transitions, nums_tags, batch_size):
+    """
+    计算 CRF 损失函数值
+    :param y: 预测值，shape = (batch_size, 句子长度，标签数量)，即每个句子中各个字符对应的标签概率
+    :param y_: ground truth，shape=(batch_size, 标签数量)
+    :param transitions: 标签转移矩阵, shape=(标签数量+1， 标签数量+1)
+    :param nums_tags: 标签数量
+    :param batch_size:  real batch size
+    :return:
+    """
     tag_scores = y
+    # 句子长度，即解码步数
     nums_steps = len(tf.unstack(tag_scores, axis=1))
     masks = tf.cast(tf.sign(y_), dtype=tf.float32)
     lengths = tf.reduce_sum(tf.sign(y_), axis=1)
@@ -97,7 +116,6 @@ def loss_wrapper(y, y_, loss_function, transitions=None, nums_tags=None, batch_s
     assert len(y) == len(y_)
     total_loss = []
     if loss_function is crf_loss:
-        #print len(y), len(transitions), len(nums_tags)
         assert len(y) == len(transitions) and len(transitions) == len(nums_tags) and batch_size is not None
         for sy, sy_, stranstion, snums_tags in zip(y, y_, transitions, nums_tags):
             total_loss.append(loss_function(sy, sy_, stranstion, snums_tags, batch_size))

@@ -23,6 +23,9 @@ parser.add_argument('-m', '--model', default='trained_model', help='Name of the 
 parser.add_argument('-tg', '--tag_scheme', default='BIES', help='Tagging scheme')
 parser.add_argument('-crf', '--crf', default=1, type=int, help='Using CRF interface')
 
+parser.add_argument('-ws', '--window_size', default=5, type=int, help='The bigest CNN window\'s size')
+parser.add_argument('-fn', '--filters_number', default=100, type=int, help='CNN filter number')
+
 parser.add_argument('-ng', '--ngram', default=3, type=int, help='Using ngrams')
 
 parser.add_argument('-wv', '--word_vector', default=False, help='Whether using word vectors', action='store_true')
@@ -46,7 +49,7 @@ parser.add_argument('-layer', '--rnn_layer_number', default=1, type=int, help='N
 parser.add_argument('-dr', '--dropout_rate', default=0.5, type=float, help='Dropout rate')
 
 parser.add_argument('-fs', '--filter_size', default=5, type=int, help='Size of the convolutinal filters')
-parser.add_argument('-fn', '--filters_number', default=32, type=int, help='Numbers of the convolutional kernels(filters)')
+# parser.add_argument('-fn', '--filters_number', default=32, type=int, help='Numbers of the convolutional kernels(filters)')
 parser.add_argument('-mp', '--max_pooling', default=2, type=int, help='Max pooling size')
 
 parser.add_argument('-iter', '--epochs', default=30, type=int, help='Numbers of epochs')
@@ -59,11 +62,11 @@ parser.add_argument('-om', '--op_metric', default='F1-score', help='Optimization
 
 parser.add_argument('-cp', '--clipping', default=False, help='Apply Gradient Clipping', action='store_true')
 
-parser.add_argument("-tb","--train_batch", help="Training batch size", default=10, type=int)
-parser.add_argument("-eb","--test_batch", help="Testing batch size", default=200, type=int)
-parser.add_argument("-rb","--tag_batch", help="Tagging batch size", default=200, type=int)
+parser.add_argument("-tb", "--train_batch", help="Training batch size", default=10, type=int)
+parser.add_argument("-eb", "--test_batch", help="Testing batch size", default=200, type=int)
+parser.add_argument("-rb", "--tag_batch", help="Tagging batch size", default=200, type=int)
 
-parser.add_argument("-g","--gpu", help="the id of gpu, the default is 0", default=0, type=int)
+parser.add_argument("-g", "--gpu", help="the id of gpu, the default is 0", default=0, type=int)
 
 parser.add_argument('-opth', '--output_path', default=None, help='Output path')
 
@@ -193,7 +196,11 @@ if args.action == 'train':
     with main_graph.as_default():
         with tf.variable_scope("tagger", reuse=None, initializer=initializer) as scope:
             # 初始化 model
-            model = Model(nums_chars=len(chars) + 2, nums_tags=nums_tags, buckets_char=b_buckets, counts=b_counts, font=args.font, tag_scheme=args.tag_scheme, word_vec=args.word_vector, graphic=args.pixels, pic_size=args.picture_size, radical=args.radical, crf=args.crf, ngram=nums_grams, batch_size=args.train_batch, metric=args.op_metric)
+            model = Model(window_size=args.window_size, filters_number=args.filters_number, nums_chars=len(chars) + 2,
+                          nums_tags=nums_tags, buckets_char=b_buckets, counts=b_counts, font=args.font,
+                          tag_scheme=args.tag_scheme, word_vec=args.word_vector, graphic=args.pixels,
+                          pic_size=args.picture_size, radical=args.radical, crf=args.crf, ngram=nums_grams,
+                          batch_size=args.train_batch, metric=args.op_metric)
             # 构建 graph，即字符输入=>字向量=>BiLSTM=>全连接层的整个模型图
             model.main_graph(trained_model=path + '/' + model_file + '_model', scope=scope, emb_dim=emb_dim, gru=args.gru, rnn_dim=args.rnn_cell_dimension, rnn_num=args.rnn_layer_number, emb=emb, ng_embs=ng_embs, drop_out=args.dropout_rate, pixels=pixels, rad_dim=args.radical_dimension, con_width=args.filter_size, filters=args.filters_number, pooling_size=args.max_pooling)
         t = time()
