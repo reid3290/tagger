@@ -5,6 +5,22 @@ import numpy as np
 
 
 def train(sess, model, batch_size, config, lr, lrv, data, dr=None, drv=None, pixels=None, pt_h=None, verbose=False):
+    """
+    训练单个 bucket 的模型
+    :param sess: tf.Session
+    :param model: [tf.placeholder]，总共5个，表示一个句子的字符本身、偏旁部首、2gram、3gram、对应标签
+    :param batch_size:
+    :param config: 目标 bucket 的 train_step, optimizer.apply_gradients()
+    :param lr: 初始学习率
+    :param lrv: 衰减后的学习率
+    :param data: 当前 bucket 中的所有句子，shape=(5, bucket 中句子数量，句子长度)
+    :param dr: drop_out
+    :param drv: =drop_out
+    :param pixels:
+    :param pt_h:
+    :param verbose:
+    """
+    # len(data)=5，表示一个句子的字符本身、偏旁部首、2gram、3gram、对应标签
     assert len(data) == len(model)
     num_items = len(data)
     samples = zip(*data)
@@ -36,17 +52,21 @@ def train(sess, model, batch_size, config, lr, lrv, data, dr=None, drv=None, pix
         start_idx += batch_size
 
 
-def predict(sess, model, data, dr=None, transitions=None, crf=True, decode_sess=None, scores=None, decode_holders=None, argmax=True, batch_size=100, pixels=None, pt_h=None, ensemble=False, verbose=False):
+def predict(sess, model, data, dr=None, transitions=None, crf=True, decode_sess=None, scores=None, decode_holders=None,
+            argmax=True, batch_size=100, pixels=None, pt_h=None, ensemble=False, verbose=False):
     en_num = None
     if ensemble:
         en_num = len(sess)
+    # 输入向量是4个，字符、偏旁、2gram、3gram
     num_items = len(data)
     input_v = model[:num_items]
     if dr is not None:
         input_v.append(dr)
     if pixels is not None:
         input_v.append(pt_h)
+    # 预测向量1个
     predictions = model[num_items:]
+    # output = [[]]
     output = [[] for _ in range(len(predictions))]
     samples = zip(*data)
     start_idx = 0
@@ -66,7 +86,7 @@ def predict(sess, model, data, dr=None, transitions=None, crf=True, decode_sess=
             print '%d' % (start_idx*100/n_samples) + '%'
         next_batch_input = samples[start_idx:start_idx + batch_size]
         batch_size = len(next_batch_input)
-        holders= []
+        holders = []
         for item in range(num_items):
             holders.append([s[item] for s in next_batch_input])
         if dr is not None:
@@ -74,8 +94,8 @@ def predict(sess, model, data, dr=None, transitions=None, crf=True, decode_sess=
         if pixels is not None:
             pt_ids = [s[0] for s in next_batch_input]
             holders.append(toolbox.get_batch_pixels(pt_ids, pixels))
-        #length_holder = tf.cast(tf.pack(holders[0]), dtype=tf.int32)
-        #length = tf.reduce_sum(tf.sign(length_holder), reduction_indices=1)
+        # length_holder = tf.cast(tf.pack(holders[0]), dtype=tf.int32)
+        # length = tf.reduce_sum(tf.sign(length_holder), reduction_indices=1)
         length = np.sum(np.sign(holders[0]), axis=1)
         length = length.astype(int)
         if crf:
@@ -88,7 +108,7 @@ def predict(sess, model, data, dr=None, transitions=None, crf=True, decode_sess=
                     ob = en_obs/en_num
                 else:
                     ob = sess.run(predictions[i], feed_dict={i: h for i, h in zip(input_v, holders)})
-                #trans = sess.run(transitions[i])
+                # trans = sess.run(transitions[i])
                 pre_values = [ob, trans[i], length, batch_size]
                 assert len(pre_values) == len(decode_holders[i])
                 max_scores, max_scores_pre = decode_sess.run(scores[i], feed_dict={i: h for i, h in zip(decode_holders[i], pre_values)})

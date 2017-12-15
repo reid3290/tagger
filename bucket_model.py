@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+from __future__ import division
 import tensorflow as tf
 from layers import EmbeddingLayer, BiLSTM, HiddenLayer, TimeDistributed, DropoutLayer, Convolution, Maxpooling, Forward
 from time import time
@@ -12,11 +13,13 @@ import math
 
 
 class Model(object):
-
-    def __init__(self, nums_chars, nums_tags, buckets_char, counts=None, pic_size=None, font=None, batch_size=10, tag_scheme='BIES', word_vec=True, radical=False, graphic=False, crf=1, ngram=None, metric='F1-score'):
+    def __init__(self, window_size, filters_number, nums_chars, nums_tags, buckets_char, counts=None, pic_size=None, font=None, batch_size=10,
+                 tag_scheme='BIES', word_vec=True, radical=False, graphic=False, crf=1, ngram=None, metric='F1-score'):
+        self.window_size = window_size
+        self.filters_number = filters_number
         # 字符种类数目
         self.nums_chars = nums_chars
-        # 标签种类数目
+        # 标签种类数目，例如[18]，至于为什么要用数组多此一举不清楚
         self.nums_tags = nums_tags
         # 每个 bucket 中句子的长度
         self.buckets_char = buckets_char
@@ -26,6 +29,7 @@ class Model(object):
         self.graphic = graphic
         self.word_vec = word_vec
         self.radical = radical
+        # 默认为1，即使用一阶条件随机场
         self.crf = crf
         self.ngram = ngram
         self.emb_layer = None
@@ -42,21 +46,29 @@ class Model(object):
         self.scores = None
         self.params = None
         self.pixels = None
+        # 默认是 F1-score
         self.metric = metric
         self.updates = []
         self.bucket_dit = {}
+        # shape = (bucket数量，每个 bucket 中的句子数量，句子长度)
         self.input_v = []
         self.input_w = []
         self.input_p = None
+        # LSTM 经全连接后的输出
         self.output = []
+        # 标签，ground truth
         self.output_ = []
         self.output_p = []
         self.output_w = []
         self.output_w_ = []
+        # 使用 viterbi 解码
         if self.crf > 0:
             self.transition_char = []
             for i in range(len(self.nums_tags)):
-                self.transition_char.append(tf.get_variable('transitions_char' + str(i), [self.nums_tags[i] + 1, self.nums_tags[i] + 1]))
+                self.transition_char.append(
+                    # 标签转移矩阵，为什么要额外加一呢？
+                    tf.get_variable('transitions_char' + str(i), [self.nums_tags[i] + 1, self.nums_tags[i] + 1])
+                )
 
         self.all_metrics = None
 
@@ -70,30 +82,22 @@ class Model(object):
         # 即限制了 batch 最大为 batch_size
         self.real_batches = toolbox.get_real_batch(self.counts, self.batch_size)
 
-    def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, rad_dim=30, emb=None, ng_embs=None, pixels=None, con_width=None, filters=None, pooling_size=None):
+    def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, rad_dim=30, emb=None,
+                   ng_embs=None, pixels=None, con_width=None, filters=None, pooling_size=None):
+        # trained_model: 模型存储路径
         if trained_model is not None:
-            param_dic = {}
-            param_dic['nums_chars'] = self.nums_chars
-            param_dic['nums_tags'] = self.nums_tags
-            param_dic['tag_scheme'] = self.tag_scheme
-            param_dic['graphic'] = self.graphic
-            param_dic['pic_size'] = self.pic_size
-            param_dic['word_vec'] = self.word_vec
-            param_dic['radical'] = self.radical
-            param_dic['crf'] = self.crf
-            param_dic['emb_dim'] = emb_dim
-            param_dic['gru'] = gru
-            param_dic['rnn_dim'] = rnn_dim
-            param_dic['rnn_num'] = rnn_num
-            param_dic['drop_out'] = drop_out
-            param_dic['filter_size'] = con_width
-            param_dic['filters'] = filters
-            param_dic['pooling_size'] = pooling_size
-            param_dic['font'] = self.font
-            param_dic['buckets_char'] = self.buckets_char
-            param_dic['ngram'] = self.ngram
-            #print param_dic
+            param_dic = {'nums_chars': self.nums_chars, 'nums_tags': self.nums_tags, 'tag_scheme': self.tag_scheme,
+                         'graphic': self.graphic, 'pic_size': self.pic_size, 'word_vec': self.word_vec,
+                         'radical': self.radical, 'crf': self.crf, 'emb_dim': emb_dim, 'gru': gru, 'rnn_dim': rnn_dim,
+                         'rnn_num': rnn_num, 'drop_out': drop_out, 'filter_size': con_width, 'filters': filters,
+                         'pooling_size': pooling_size, 'font': self.font, 'buckets_char': self.buckets_char,
+                         'ngram': self.ngram}
+            # print param_dic
+
+            # 存储模型超参数
             if self.metric == 'All':
+                # rindex() 返回子字符串 str 在字符串中最后出现的位置
+                # 截取模型文件名
                 pindex = trained_model.rindex('/') + 1
                 for m in self.all_metrics:
                     f_model = open(trained_model[:pindex] + m + '_' + trained_model[pindex:], 'w')
@@ -112,7 +116,7 @@ class Model(object):
 
         # 字向量层
         # 为什么字符数要加 500 ？
-        # emd_dim 是每个字符的特征向量维度，可以通过命令行参数设置
+        # emb_dim 是每个字符的特征向量维度，可以通过命令行参数设置
         # weights 表示预训练的字向量，可以通过命令行参数设置
         if self.word_vec:
             self.emb_layer = EmbeddingLayer(self.nums_chars + 500, emb_dim, weights=emb, name='emb_layer')
@@ -130,9 +134,11 @@ class Model(object):
             else:
                 ng_embs = [None for _ in range(len(self.ngram))]
             for i, n_gram in enumerate(self.ngram):
-                self.gram_layers.append(EmbeddingLayer(n_gram + 1000 * (i + 2), emb_dim, weights=ng_embs[i], name= str(i + 2) + 'gram_layer'))
+                self.gram_layers.append(EmbeddingLayer(n_gram + 1000 * (i + 2), emb_dim, weights=ng_embs[i],
+                                                       name=str(i + 2) + 'gram_layer'))
 
-        wrapper_conv_1, wrapper_mp_1, wrapper_conv_2, wrapper_mp_2, wrapper_dense, wrapper_dr = None, None, None, None, None, None
+        wrapper_conv_1, wrapper_mp_1, wrapper_conv_2, wrapper_mp_2, wrapper_dense, wrapper_dr = \
+            None, None, None, None, None, None
 
         if self.graphic:
             # 使用图像信息，需要用到 CNN
@@ -152,7 +158,8 @@ class Model(object):
 
             p_size_2 = toolbox.down_pool(p_size_1, pooling_size)
 
-            wrapper_dense = TimeDistributed(HiddenLayer(p_size_2 * p_size_2 * filters, 100, activation='tanh', name='conv_dense'), name='wrapper_3')
+            wrapper_dense = TimeDistributed(
+                HiddenLayer(p_size_2 * p_size_2 * filters, 100, activation='tanh', name='conv_dense'), name='wrapper_3')
             wrapper_dr = TimeDistributed(DropoutLayer(self.drop_out), name='wrapper_dr')
 
         with tf.variable_scope('BiRNN'):
@@ -165,19 +172,25 @@ class Model(object):
                 bw_rnn_cell = tf.nn.rnn_cell.LSTMCell(rnn_dim, state_is_tuple=True)
 
             if rnn_num > 1:
-                fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([fw_rnn_cell]*rnn_num, state_is_tuple=True)
-                bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([bw_rnn_cell]*rnn_num, state_is_tuple=True)
+                fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([fw_rnn_cell] * rnn_num, state_is_tuple=True)
+                bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([bw_rnn_cell] * rnn_num, state_is_tuple=True)
 
-        # 隐层层，输入是前向 RNN 的输出加上 后向 RNN 的输出，所以输入维度为 rnn_dim * 2
+        # 隐藏层，输入是前向 RNN 的输出加上 后向 RNN 的输出，所以输入维度为 rnn_dim * 2
         # 输出维度即标签个数
-        output_wrapper = TimeDistributed(HiddenLayer(rnn_dim * 2, self.nums_tags[0], activation='linear', name='hidden'), name='wrapper')
+        output_wrapper = TimeDistributed(
+            HiddenLayer(rnn_dim * 2, self.nums_tags[0], activation='linear', name='hidden'),
+            name='wrapper')
 
-        #define model for each bucket
+        # define model for each bucket
+        # 每一个 bucket 中的句子长度不一样，所以需要定义单独的模型
         for idx, bucket in enumerate(self.buckets_char):
             if idx == 1:
+                # scope 是 tf.variable_scope("tagger", reuse=None, initializer=initializer)
                 scope.reuse_variables()
             t1 = time()
 
+            # 输入的句子，one-hot 向量
+            # shape = （batch_size, 句子长度）
             input_v = tf.placeholder(tf.int32, [None, bucket], name='input_' + str(bucket))
 
             self.input_v.append([input_v])
@@ -185,6 +198,8 @@ class Model(object):
             emb_set = []
 
             if self.word_vec:
+                # 根据 one-hot 向量查找对应的字向量
+                # word_out: shape=(batch_size, 句子长度，字向量维度（64）)
                 word_out = self.emb_layer(input_v)
                 emb_set.append(word_out)
 
@@ -203,7 +218,7 @@ class Model(object):
                     emb_set.append(gram_out)
 
             if self.graphic:
-                input_p = tf.placeholder(tf.float32, [None, bucket, pixel_dim*pixel_dim])
+                input_p = tf.placeholder(tf.float32, [None, bucket, pixel_dim * pixel_dim])
                 self.input_p.append(input_p)
 
                 pix_out = tf.reshape(input_p, [-1, bucket, pixel_dim, pixel_dim, 1])
@@ -223,17 +238,50 @@ class Model(object):
 
                 emb_set.append(graphic_out)
 
-
+            # TODO: 改作用 CNN 提取字向量信息，就需要改 emb_out 的值
             if len(emb_set) > 1:
+                # 各种字向量直接 concat 起来（字向量、偏旁部首、n-gram、图像信息等）
                 emb_out = tf.concat(axis=2, values=emb_set)
 
             else:
                 emb_out = emb_set[0]
 
-            rnn_out = BiLSTM(rnn_dim, fw_cell=fw_rnn_cell, bw_cell=bw_rnn_cell, p=dr, name='BiLSTM' + str(bucket), scope='BiRNN')(emb_out, input_v)
+            if self.window_size > 1:
 
+                padding_size = int(np.floor(self.window_size / 2))
+                word_padded = tf.pad(word_out, [[0, 0], [padding_size, padding_size], [0, 0]], 'CONSTANT')
+
+                Ws = []
+                for q in range(1, self.window_size + 1):
+                    Ws.append(tf.Variable(tf.truncated_normal([q * emb_dim, self.filters_number], stddev=0.1), name="W_%d" % q))
+                b = tf.Variable(tf.constant(0.1, shape=[self.filters_number]), name="b")
+
+                z = [None for _ in range(0, bucket)]
+
+                for q in range(1, self.window_size + 1):
+                    for i in range(padding_size, bucket + padding_size):
+                        low = i - int(np.floor((q - 1) / 2))
+                        high = i + int(np.ceil((q + 1) / 2))
+                        x = word_padded[:, low, :]
+                        for j in range(low + 1, high):
+                            x = tf.concat(values=[x, word_padded[:, j, :]], axis=1)
+                        z_iq = tf.tanh(tf.nn.xw_plus_b(x, Ws[q - 1], b))
+                        if z[i - padding_size] is None:
+                            z[i - padding_size] = z_iq
+                        else:
+                            z[i - padding_size] = tf.concat([z[i - padding_size], z_iq], axis=1)
+
+                z = tf.stack(z, axis=1)
+                values, indices = tf.nn.top_k(z, sorted=False, k=emb_dim)
+                emb_out = values
+
+            # rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
+            rnn_out = BiLSTM(rnn_dim, fw_cell=fw_rnn_cell, bw_cell=bw_rnn_cell, p=dr,
+                             name='BiLSTM' + str(bucket), scope='BiRNN')(emb_out, input_v)
+
+            # 应用全连接层，Wx+b 得到最后的输出
             output = output_wrapper(rnn_out)
-
+            # 为什么要 [output] 而不是 output 呢？
             self.output.append([output])
 
             self.output_.append([tf.placeholder(tf.int32, [None, bucket], name='tags' + str(bucket))])
@@ -242,7 +290,10 @@ class Model(object):
 
             print 'Bucket %d, %f seconds' % (idx + 1, time() - t1)
 
-        assert len(self.input_v) == len(self.output) and len(self.output) == len(self.output_) and len(self.output) == len(self.counts)
+        assert \
+            len(self.input_v) == len(self.output) and \
+            len(self.output) == len(self.output_) and \
+            len(self.output) == len(self.counts)
 
         self.params = tf.trainable_variables()
 
@@ -250,6 +301,15 @@ class Model(object):
 
     def config(self, optimizer, decay, lr_v=None, momentum=None, clipping=False, max_gradient_norm=5.0):
 
+        """
+
+        :param optimizer: 优化函数，Adagrad
+        :param decay: 学习率衰减率，0.05
+        :param lr_v:  学习率，0.1
+        :param momentum:
+        :param clipping: 是否运用梯度裁剪（给梯度设置最大阈值）
+        :param max_gradient_norm:
+        """
         self.decay = decay
         print 'Training preparation...'
 
@@ -257,8 +317,12 @@ class Model(object):
         loss = []
         if self.crf > 0:
             loss_function = losses.crf_loss
+
             for i in range(len(self.input_v)):
-                bucket_loss = losses.loss_wrapper(self.output[i], self.output_[i], loss_function, transitions=self.transition_char, nums_tags=self.nums_tags, batch_size=self.real_batches[i])
+                # 根据第 i 个 bucket 的输出和 ground truth，用以 CRF 损失函数，计算损失函数值
+                bucket_loss = losses.loss_wrapper(self.output[i], self.output_[i], loss_function,
+                                                  transitions=self.transition_char, nums_tags=self.nums_tags,
+                                                  batch_size=self.real_batches[i])
                 loss.append(bucket_loss)
         else:
             loss_function = losses.sparse_cross_entropy
@@ -342,7 +406,24 @@ class Model(object):
             self.decode_holders.append(decode_holders)
             self.scores.append(scores)
 
-    def train(self, t_x, t_y, v_x, v_y, idx2tag, idx2char, sess, epochs, trained_model, lr=0.05, decay=0.05, decay_step=1, tag_num=1):
+    def train(self, t_x, t_y, v_x, v_y, idx2tag, idx2char, sess,
+              epochs, trained_model, lr=0.05, decay=0.05, decay_step=1, tag_num=1):
+        """
+
+        :param t_x: b_train_x
+        :param t_y: b_train_y
+        :param v_x: b_dev_x
+        :param v_y: b_dev_y
+        :param idx2tag:
+        :param idx2char:
+        :param sess:
+        :param epochs: 训练轮数
+        :param trained_model: 训练好的模型参数
+        :param lr: 学习率
+        :param decay: 学习率衰减率
+        :param decay_step:
+        :param tag_num: 标签种类个数
+        """
         lr_r = lr
 
         best_epoch, best_score, best_seg, best_pos, c_tag, c_seg, c_score = {}, {}, {}, {}, {}, {}, {}
@@ -351,6 +432,7 @@ class Model(object):
 
         metric = self.metric
 
+        # 每种衡量标准下都有对应的最佳结果
         for m in self.all_metrics:
             best_epoch[m] = 0
             best_score[m] = 0
@@ -366,43 +448,57 @@ class Model(object):
         v_y = toolbox.unpad_zeros(v_y)
 
         gold = toolbox.decode_tags(v_y, idx2tag, self.tag_scheme)
+        # 0 是字符本身，1 是偏旁部首，2、3 分别是 2gram 和 3gram
         input_chars = toolbox.merge_bucket([v_x[0]])
 
         chars = toolbox.decode_chars(input_chars[0], idx2char)
-
+        # 正确答案，实际上直接读取 dev.txt 即可得到，不知为何还要这么麻烦通过各种 ID 转换获取
         gold_out = toolbox.generate_output(chars, gold, self.tag_scheme)
 
         for epoch in range(epochs):
             print 'epoch: %d' % (epoch + 1)
             t = time()
+            # 在 decay_step 轮之后，衰减学习率
             if epoch % decay_step == 0 and decay > 0:
-                lr_r = lr/(1 + decay*(epoch/decay_step))
-
+                lr_r = lr / (1 + decay * (epoch / decay_step))
+            # data_list: shape=(5,bucket 数量，bucket 中句子个数，句子长度)
             data_list = t_x + t_y
-
+            # samples: shape=(bucket 数量，5, bucket 中句子个数，句子长度)，相当于置换了 data_list 中的 shape[0] 和 shape[1]
             samples = zip(*data_list)
 
             random.shuffle(samples)
 
+            # 遍历每一个 bucket
             for sample in samples:
+                # sample: shape=(5, bucket 中句子个数，句子长度)
+                # 当前 bucket 中的句子长度
                 c_len = len(sample[0][0])
+                # 当前 bucket 的序号
                 idx = self.bucket_dit[c_len]
                 real_batch_size = self.real_batches[idx]
+                # 当前 bucket 的模型的输入和输出（注意每个 bucket 都有一个单独的模型）
                 model = self.input_v[idx] + self.output_[idx]
                 pt_holder = None
                 if self.graphic:
                     pt_holder = self.input_p[idx]
-                Batch.train(sess=sess[0], model=model, batch_size=real_batch_size, config=self.train_step[idx], lr=self.l_rate, lrv=lr_r, dr=self.drop_out, drv=self.drop_out_v, data=list(sample), pt_h=pt_holder, pixels=self.pixels, verbose=False)
+                # sess[0] 是 main_sess, sess[1] 是 decode_sess(如果使用 CRF 的话)
+                # 训练当前的 bucket，这个函数里面才真正地为模型填充了数据并运行(以 real_batch_size 为单位，将 bucket 中的句子依次喂给模型)
+                # 被 sess.run 的是 config=self.train_step[idx]，train_step[idx] 就会触发 BP 更新参数了
+                Batch.train(sess=sess[0], model=model, batch_size=real_batch_size, config=self.train_step[idx],
+                            lr=self.l_rate, lrv=lr_r, dr=self.drop_out, drv=self.drop_out_v, data=list(sample),
+                            pt_h=pt_holder, pixels=self.pixels, verbose=False)
 
             predictions = []
-
+            # 遍历每个 bucket, 用开发集测试准确率
             for v_b_x in zip(*v_x):
+                # v_b_x: shape=(4,bucket 中句子个数，句子长度)
                 c_len = len(v_b_x[0][0])
                 idx = self.bucket_dit[c_len]
                 pt_holder = None
                 if self.graphic:
                     pt_holder = self.input_p[idx]
-                b_prediction = self.predict(data=v_b_x, sess=sess, model=self.input_v[idx] + self.output[idx], index=idx, pt_h=pt_holder, pt=self.pixels, batch_size=100)
+                b_prediction = self.predict(data=v_b_x, sess=sess, model=self.input_v[idx] + self.output[idx],
+                                            index=idx, pt_h=pt_holder, pt=self.pixels, batch_size=100)
                 b_prediction = toolbox.decode_tags(b_prediction, idx2tag, self.tag_scheme)
                 predictions.append(b_prediction)
 
@@ -414,7 +510,7 @@ class Model(object):
             scores = toolbox.evaluator(prediction_out, gold_out, metric=metric, verbose=True, tag_num=tag_num)
             scores = np.asarray(scores)
 
-            #Score_seg * Score_seg&tag
+            # Score_seg * Score_seg&tag
             c_seg['Precision'] = scores[0]
             c_seg['Recall'] = scores[1]
             c_seg['F1-score'] = scores[2]
@@ -453,7 +549,8 @@ class Model(object):
                         best_score[m] = c_score[m]
                         best_seg[m] = c_seg[m]
                         best_pos[m] = c_tag[m]
-                        self.saver.save(sess[0],  trained_model[:pindex] + m + '_' + trained_model[pindex:], write_meta_graph=False)
+                        self.saver.save(sess[0], trained_model[:pindex] + m + '_' + trained_model[pindex:],
+                                        write_meta_graph=False)
 
             elif c_score[metric] > best_score[metric] and epoch > 4:
                 best_epoch[metric] = epoch + 1
@@ -486,7 +583,8 @@ class Model(object):
             new_emb = toolbox.get_new_embeddings(new_chars, emb_dim, emb_path)
             n_emb_sh = new_emb.get_shape().as_list()
             if len(n_emb_sh) > 1:
-                new_emb_weights = tf.concat(axis=0, values=[old_emb_weights[:len(char2idx) - len(new_chars)], new_emb, old_emb_weights[len(char2idx):]])
+                new_emb_weights = tf.concat(axis=0, values=[old_emb_weights[:len(char2idx) - len(new_chars)], new_emb,
+                                                            old_emb_weights[len(char2idx):]])
                 if new_emb_weights.get_shape().as_list()[0] > emb_len:
                     new_emb_weights = new_emb_weights[:emb_len]
                 assign_op = old_emb_weights.assign(new_emb_weights)
@@ -497,7 +595,8 @@ class Model(object):
             ng_emb_dim = old_gram_weights[0].get_shape().as_list()[1]
             new_ng_emb = toolbox.get_new_ng_embeddings(new_grams, ng_emb_dim, ng_emb_path)
             for i in range(len(old_gram_weights)):
-                new_ng_weight = tf.concat(axis=0, values=[old_gram_weights[i][:len(gram2idx[i]) - len(new_grams[i])], new_ng_emb[i], old_gram_weights[i][len(gram2idx[i]):]])
+                new_ng_weight = tf.concat(axis=0, values=[old_gram_weights[i][:len(gram2idx[i]) - len(new_grams[i])],
+                                                          new_ng_emb[i], old_gram_weights[i][len(gram2idx[i]):]])
                 assign_op = old_gram_weights[i].assign(new_ng_weight)
                 self.updates.append(assign_op)
 
@@ -519,7 +618,8 @@ class Model(object):
         if self.graphic:
             pt_holder = self.input_p[0]
 
-        prediction = self.predict(data=t_x, sess=sess, model=self.input_v[0] + self.output[0], index=0, pt_h=pt_holder, pt=self.pixels, ensemble=ensemble, batch_size=batch_size)
+        prediction = self.predict(data=t_x, sess=sess, model=self.input_v[0] + self.output[0], index=0, pt_h=pt_holder,
+                                  pt=self.pixels, ensemble=ensemble, batch_size=batch_size)
         prediction = toolbox.decode_tags(prediction, idx2tag, self.tag_scheme)
         prediction_out = toolbox.generate_output(chars, prediction, self.tag_scheme)
 
@@ -543,7 +643,8 @@ class Model(object):
             final_out = prediction_out[0]
             toolbox.printer(final_out, outpath)
 
-    def tag(self, sess, r_x, idx2tag, idx2char, char2idx, outpath='out.txt', ensemble=None, batch_size=200, large_file=False):
+    def tag(self, sess, r_x, idx2tag, idx2char, char2idx, outpath='out.txt', ensemble=None, batch_size=200,
+            large_file=False):
 
         chars = toolbox.decode_chars(r_x[0], idx2char)
 
@@ -562,7 +663,8 @@ class Model(object):
 
         real_batch = batch_size * 300 / c_len
 
-        prediction = self.predict(data=r_x, sess=sess, model=self.input_v[idx] + self.output[idx], index=idx, pt_h=pt_holder, pt=self.pixels, ensemble=ensemble, batch_size=real_batch)
+        prediction = self.predict(data=r_x, sess=sess, model=self.input_v[idx] + self.output[idx], index=idx,
+                                  pt_h=pt_holder, pt=self.pixels, ensemble=ensemble, batch_size=real_batch)
         prediction = toolbox.decode_tags(prediction, idx2tag, self.tag_scheme)
         prediction_out = toolbox.generate_output(chars, prediction, self.tag_scheme)
 
@@ -572,15 +674,31 @@ class Model(object):
         else:
             toolbox.printer(final_out, outpath)
 
-    def predict(self, data, sess, model, index=None, argmax=True, batch_size=100, pt_h=None, pt=None, ensemble=None, verbose=False):
+    def predict(self, data, sess, model, index=None, argmax=True, batch_size=100,
+                pt_h=None, pt=None, ensemble=None, verbose=False):
+
+        """
+        预测标签
+        :param data: 一个 bucket 中的所有句子
+        :param sess: [tf.Session]，两个，一个是训练的，一个是解码的
+        :param model: [tf.placeholder]，接受 feed 给模型的数据
+        :param index: 当前 bucket 的序号
+        :param argmax:
+        :param batch_size:
+        :param pt_h:
+        :param pt:
+        :param ensemble:
+        :param verbose:
+        :return:
+        """
         if self.crf:
             assert index is not None
-            predictions = Batch.predict(sess=sess[0], decode_sess=sess[1], model=model, transitions=self.transition_char, crf=self.crf, scores=self.scores[index], decode_holders=self.decode_holders[index], argmax=argmax, batch_size=batch_size, data=data, dr=self.drop_out, pixels=pt, pt_h=pt_h, ensemble=ensemble, verbose=verbose)
+            predictions = Batch.predict(sess=sess[0], decode_sess=sess[1], model=model,
+                                        transitions=self.transition_char, crf=self.crf, scores=self.scores[index],
+                                        decode_holders=self.decode_holders[index], argmax=argmax, batch_size=batch_size,
+                                        data=data, dr=self.drop_out, pixels=pt, pt_h=pt_h, ensemble=ensemble,
+                                        verbose=verbose)
         else:
-            predictions = Batch.predict(sess=sess[0], model=model, crf=self.crf, argmax=argmax, batch_size=batch_size, data=data, dr=self.drop_out, ensemble=ensemble, verbose=verbose)
+            predictions = Batch.predict(sess=sess[0], model=model, crf=self.crf, argmax=argmax, batch_size=batch_size,
+                                        data=data, dr=self.drop_out, ensemble=ensemble, verbose=verbose)
         return predictions
-
-
-
-
-

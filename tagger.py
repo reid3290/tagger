@@ -23,6 +23,9 @@ parser.add_argument('-m', '--model', default='trained_model', help='Name of the 
 parser.add_argument('-tg', '--tag_scheme', default='BIES', help='Tagging scheme')
 parser.add_argument('-crf', '--crf', default=1, type=int, help='Using CRF interface')
 
+parser.add_argument('-ws', '--window_size', default=5, type=int, help='The bigest CNN window\'s size')
+parser.add_argument('-fn', '--filters_number', default=100, type=int, help='CNN filter number')
+
 parser.add_argument('-ng', '--ngram', default=3, type=int, help='Using ngrams')
 
 parser.add_argument('-wv', '--word_vector', default=False, help='Whether using word vectors', action='store_true')
@@ -46,7 +49,7 @@ parser.add_argument('-layer', '--rnn_layer_number', default=1, type=int, help='N
 parser.add_argument('-dr', '--dropout_rate', default=0.5, type=float, help='Dropout rate')
 
 parser.add_argument('-fs', '--filter_size', default=5, type=int, help='Size of the convolutinal filters')
-parser.add_argument('-fn', '--filters_number', default=32, type=int, help='Numbers of the convolutional kernels(filters)')
+# parser.add_argument('-fn', '--filters_number', default=32, type=int, help='Numbers of the convolutional kernels(filters)')
 parser.add_argument('-mp', '--max_pooling', default=2, type=int, help='Max pooling size')
 
 parser.add_argument('-iter', '--epochs', default=30, type=int, help='Numbers of epochs')
@@ -59,11 +62,11 @@ parser.add_argument('-om', '--op_metric', default='F1-score', help='Optimization
 
 parser.add_argument('-cp', '--clipping', default=False, help='Apply Gradient Clipping', action='store_true')
 
-parser.add_argument("-tb","--train_batch", help="Training batch size", default=10, type=int)
-parser.add_argument("-eb","--test_batch", help="Testing batch size", default=200, type=int)
-parser.add_argument("-rb","--tag_batch", help="Tagging batch size", default=200, type=int)
+parser.add_argument("-tb", "--train_batch", help="Training batch size", default=10, type=int)
+parser.add_argument("-eb", "--test_batch", help="Testing batch size", default=200, type=int)
+parser.add_argument("-rb", "--tag_batch", help="Tagging batch size", default=200, type=int)
 
-parser.add_argument("-g","--gpu", help="the id of gpu, the default is 0", default=0, type=int)
+parser.add_argument("-g", "--gpu", help="the id of gpu, the default is 0", default=0, type=int)
 
 parser.add_argument('-opth', '--output_path', default=None, help='Output path')
 
@@ -128,9 +131,9 @@ if args.action == 'train':
 
     char2idx, idx2char, tag2idx, idx2tag = toolbox.get_dic(chars, tags)
 
+    # train_x: shape=(2,句子数量)，2 表示字符本身+偏旁部首
     train_x, train_y, train_max_slen_c, train_max_slen_w, train_max_wlen = toolbox.get_input_vec(path, train_file, char2idx, tag2idx, rad_dic=rad_dic, tag_scheme=args.tag_scheme)
     dev_x, dev_y, dev_max_slen_c, dev_max_slen_w, dev_max_wlen = toolbox.get_input_vec(path, dev_file, char2idx, tag2idx, rad_dic=rad_dic, tag_scheme=args.tag_scheme)
-
 
     # 读取 ngram 向量
     nums_grams = None
@@ -140,6 +143,7 @@ if args.action == 'train':
         gram2idx = toolbox.get_ngram_dic(ngram)
         train_gram = toolbox.get_gram_vec(path, train_file, gram2idx)
         dev_gram = toolbox.get_gram_vec(path, dev_file, gram2idx)
+        # 这一句后 train_x： shape=(4,句子数量)，因为加了 2gram 和 3gram
         train_x += train_gram
         dev_x += dev_gram
         nums_grams = []
@@ -164,9 +168,13 @@ if args.action == 'train':
 
     print 'Longest word is %d. ' % max_w_len
 
+    # b_train_x: shape=(4, bucket 数量，)
     b_train_x, b_train_y = toolbox.buckets(train_x, train_y, size=args.bucket_size)
     b_dev_x, b_dev_y = toolbox.buckets(dev_x, dev_y, size=args.bucket_size)
 
+    # 在句子在末尾填充 0 从而使得每个 bucket 内的句子长度保持一致
+    # b_train_x: shape=(4, bucket 数量，每个 bucket 内的句子数量，句子长度)
+    # b_train_y: shape=(1, bucket 数量，每个 bucket 内的句子数量，句子长度)，1表示每个字对应1个标签
     b_train_x, b_train_y, b_buckets, b_counts = toolbox.pad_bucket(b_train_x, b_train_y)
     # b_buckets：每一个 bucket 中句子的长度（已经对齐过，bucket 中所有句子的长度一致）
     # b_counts：每一个 bucket 中句子的个数
@@ -187,11 +195,18 @@ if args.action == 'train':
     main_graph = tf.Graph()
     with main_graph.as_default():
         with tf.variable_scope("tagger", reuse=None, initializer=initializer) as scope:
-
-            model = Model(nums_chars=len(chars) + 2, nums_tags=nums_tags, buckets_char=b_buckets, counts=b_counts, font=args.font, tag_scheme=args.tag_scheme, word_vec=args.word_vector, graphic=args.pixels, pic_size=args.picture_size, radical=args.radical, crf=args.crf, ngram=nums_grams, batch_size=args.train_batch, metric=args.op_metric)
+            # 初始化 model
+            model = Model(window_size=args.window_size, filters_number=args.filters_number, nums_chars=len(chars) + 2,
+                          nums_tags=nums_tags, buckets_char=b_buckets, counts=b_counts, font=args.font,
+                          tag_scheme=args.tag_scheme, word_vec=args.word_vector, graphic=args.pixels,
+                          pic_size=args.picture_size, radical=args.radical, crf=args.crf, ngram=nums_grams,
+                          batch_size=args.train_batch, metric=args.op_metric)
+            # 构建 graph，即字符输入=>字向量=>BiLSTM=>全连接层的整个模型图
             model.main_graph(trained_model=path + '/' + model_file + '_model', scope=scope, emb_dim=emb_dim, gru=args.gru, rnn_dim=args.rnn_cell_dimension, rnn_num=args.rnn_layer_number, emb=emb, ng_embs=ng_embs, drop_out=args.dropout_rate, pixels=pixels, rad_dim=args.radical_dimension, con_width=args.filter_size, filters=args.filters_number, pooling_size=args.max_pooling)
         t = time()
-        model.config(optimizer=args.optimizer, decay=args.decay_rate, lr_v=args.learning_rate, momentum=args.momentum, clipping=args.clipping)
+        # 根据指定参数策略计算损失函数，计算梯度，应用梯度下降
+        model.config(optimizer=args.optimizer, decay=args.decay_rate,
+                     lr_v=args.learning_rate, momentum=args.momentum, clipping=args.clipping)
         init = tf.global_variables_initializer()
     # Finalizes this graph, making it read-only.
     main_graph.finalize()
@@ -199,6 +214,7 @@ if args.action == 'train':
     main_sess = tf.Session(config=config, graph=main_graph)
 
     if args.crf:
+        # 如果是用 Viterbi 解码，则还需要构建解码图
         decode_graph = tf.Graph()
         with decode_graph.as_default():
             model.decode_graph()
@@ -216,7 +232,10 @@ if args.action == 'train':
         main_sess.run(init)
         print 'Done. Time consumed: %d seconds' % int(time() - t)
         t = time()
-        model.train(t_x=b_train_x, t_y=b_train_y, v_x=b_dev_x, v_y=b_dev_y, idx2tag=idx2tag, idx2char=idx2char, sess=sess, epochs=args.epochs, trained_model=path + '/' + model_file + '_weights', lr=args.learning_rate, decay=args.decay_rate, tag_num=len(tags))
+        # run graph 进行训练
+        model.train(t_x=b_train_x, t_y=b_train_y, v_x=b_dev_x, v_y=b_dev_y, idx2tag=idx2tag, idx2char=idx2char,
+                    sess=sess, epochs=args.epochs, trained_model=path + '/' + model_file + '_weights',
+                    lr=args.learning_rate, decay=args.decay_rate, tag_num=len(tags))
         print 'Done. Time consumed: %d seconds' % int(time() - t)
 
 else:
@@ -253,7 +272,7 @@ else:
     crf = param_dic['crf']
     emb_dim = param_dic['emb_dim']
     pic_size = param_dic['pic_size']
-    #pixels = param_dic['pixels']
+    # pixels = param_dic['pixels']
     gru = param_dic['gru']
     rnn_dim = param_dic['rnn_dim']
     rnn_num = param_dic['rnn_num']

@@ -36,6 +36,7 @@ def get_ngrams(raw, gram):
             gram_set.add(ch)
     return gram_set
 
+
 # 读取训练集和开发集中的文本信息：字符、标签、ngram，然后写入相关文件供后续使用
 def get_vocab_tag(path, filelist, ngram=1):
     out_char = codecs.open(path + '/chars.txt', 'w', encoding='utf-8')
@@ -837,6 +838,11 @@ def pad_zeros(l, max_len):
 
 
 def unpad_zeros(l):
+    """
+    去除句子末尾人为添加的 0
+    :param l: shape = (1,句子总数，各个句子的长度)
+    :return:  shape = (1,句子总数，去零后各个句子的长度)
+    """
     out = []
     for tags in l:
         out.append([np.trim_zeros(line) for line in tags])
@@ -844,14 +850,23 @@ def unpad_zeros(l):
 
 
 def decode_tags(idx, index2tags, tag_scheme):
+    """
+    根据 tag id 获取对应的 tag
+    :param idx: shape = (1, 句子总数，每个句子的长度)
+    :param index2tags:
+    :param tag_scheme:
+    :return: shape = (1, 句子总数，每个句子的长度)，就是将输入的句子标签 ID 转换成了具体的标签名称
+    """
     out = []
 
     dic = index2tags[tag_scheme]
     for id in idx:
         sents = []
         for line in id:
+            # line：一个句子
             sent = []
             for item in line:
+                # item：一个字
                 tag = dic[item]
                 if '-' in tag:
                     tag = tag.replace('E-', 'I-')
@@ -880,6 +895,7 @@ def trim_output(out, length):
         trimmed_out.append(item[:l])
     return trimmed_out
 
+
 # 获取所有组合标签的个数
 # 为什么要以数组的形式返回呢？
 def get_nums_tags(tag2idx, tag_scheme):
@@ -893,7 +909,7 @@ def generate_output(chars, tags, tag_scheme):
         assert len(chars) == len(tag)
         sub_out = []
         for chs, tgs in zip(chars, tag):
-            #print len(chs), len(tgs)
+            # print len(chs), len(tgs)
             assert len(chs) == len(tgs)
             c_word = ''
             c_tag = ''
@@ -940,12 +956,13 @@ def evaluator(prediction, gold, metric='F1-score', tag_num=1, verbose=False):
     return scores + scores_b
 
 
-
 def printer(predictions, out_path):
     fout = codecs.open(out_path, 'w', encoding='utf-8')
     for line in predictions:
         fout.write(line + '\n')
     fout.close()
+
+
 # 将句子按字符串长度排序，置入多个 buckets 中去，每一个 bucket 中的句子之间的长度差不超过 size
 def buckets(x, y, size=10):
     assert len(x[0]) == len(y[0])
@@ -969,6 +986,7 @@ def buckets(x, y, size=10):
             bucks[i][idx].append(item[i])
 
     return bucks[:num_inputs], bucks[num_inputs:]
+
 
 # 原始输入通过上面一个函数放到了 buckets 中，本函数将每个 bucket 中的句子对齐
 # （取当前 bucket 中最长的那句的长度作为 bucket 的长度，其他较短的句子在后面补0）
@@ -1011,6 +1029,11 @@ def pad_bucket(x, y, bucket_len_c=None):
 
 
 def merge_bucket(x):
+    """
+    将 bucket 合并到一起
+    :param x: shape=(x, bucket数量，bucket 内的句子数量，相应的句子长度)
+    :return: shape=(x, 所有 bucket 内的句子数量之后，相应的句子长度)
+    """
     out = []
     for item in x:
         m = []

@@ -12,8 +12,8 @@ class HiddenLayer(object):
     """
     def __init__(self, input_dim, output_dim, bias=True, activation='tanh', name='hidden_layer'):
         """
-        :param input_dim:
-        :param output_dim:
+        :param input_dim: rnn_dim * 2（双向 RNN）
+        :param output_dim: 标签种类（BEIS*POS）
         :param bias:
         :param activation:
         :param name:
@@ -35,12 +35,12 @@ class HiddenLayer(object):
         elif activation is not None:
             raise Exception('Unknown activation function: ' % activation)
 
-        #Initialise weights and bias
+        # Initialise weights and bias
         rand_uniform_init = tf.contrib.layers.xavier_initializer()
         self.weights = tf.get_variable(name + '_weights', [input_dim, output_dim], initializer=rand_uniform_init)
         self.bias = tf.get_variable(name + '_bias', [output_dim], initializer=tf.constant_initializer(0.0))
 
-        #define parameters
+        # define parameters
         if self.is_bias:
             self.params = [self.weights, self.bias]
         else:
@@ -70,8 +70,8 @@ class EmbeddingLayer(object):
     """
     def __init__(self, input_dim, output_dim, weights=None, is_variable=False, trainable=True, name='embedding_layer'):
         """
-        :param input_dim:
-        :param output_dim:
+        :param input_dim: 字表大小
+        :param output_dim: 字向量维度，默认是64
         :param name:
         """
         self.input_dim = input_dim
@@ -92,7 +92,7 @@ class EmbeddingLayer(object):
                 padd_weights = np.zeros([self.input_dim - emb_count, self.output_dim], dtype='float32')
                 self.weights = np.concatenate((self.weights, padd_weights), axis=0)
             self.embeddings = tf.get_variable(self.name + '_emb', initializer=self.weights, trainable=self.trainable)
-        #Define Parameters
+        # Define Parameters
         self.params = [self.embeddings]
         self.weight_name = self.name + '_emb'
 
@@ -104,6 +104,7 @@ class EmbeddingLayer(object):
         :return:
         """
         self.input = input_t
+        # tf.gather: Gather slices from params axis axis according to indices
         self.output = tf.gather(self.embeddings, self.input)
         return self.output
 
@@ -190,11 +191,15 @@ class BiLSTM(object):
     """
     def __init__(self, cell_dim, nums_layers=1, p=0.5, fw_cell=None, bw_cell=None, state=False, name='biLSTM', scope=None):
         """
-        :param cell_dim:
-        :param nums_steps:
-        :param nums_layers:
-        :param p:
-        :param name:
+
+        :param cell_dim: RNN 隐藏层神经元个数，默认设置是 200
+        :param nums_layers: RNN 层数（深度）
+        :param p: dropout 概率
+        :param fw_cell: 前向 RNN 单元
+        :param bw_cell: 后向 RNN 单元
+        :param state:
+        :param name: 每个 bucket 有一个 BiLSTM，名称为 'BiLSTM' + str(bucket)
+        :param scope: “BiRNN”
         """
         self.cell_dim = cell_dim
         self.nums_layers = nums_layers
@@ -210,28 +215,41 @@ class BiLSTM(object):
             self.lstm_cell_bw = tf.nn.rnn_cell.LSTMCell(self.cell_dim, state_is_tuple=True)
         else:
             self.lstm_cell_bw = bw_cell
-        #assert 0. <= p < 1
+        # assert 0. <= p < 1
 
     def __call__(self, input_t, input_ids):
+        """
+
+        :param input_t: emb_out，每个字对应的字向量
+        :param input_ids: input_v，每个字的 one-hot 向量，即 IDs，shape=（句子个数，句子长度）
+        :return: RNN 的 output，shape=(句子个数，句子长度，rnn_dim*2)
+        """
         self.input = input_t
         self.input_ids = input_ids
-        #if self.p > 0.:
+        # if self.p > 0.:
         self.lstm_cell_fw = tf.nn.rnn_cell.DropoutWrapper(self.lstm_cell_fw, output_keep_prob=(1 - self.p))
         self.lstm_cell_bw = tf.nn.rnn_cell.DropoutWrapper(self.lstm_cell_bw, output_keep_prob=(1 - self.p))
         if self.nums_layers > 1:
             self.lstm_cell_fw = tf.nn.rnn_cell.MultiRNNCell([self.lstm_cell_fw] * self.nums_layers)
             self.lstm_cell_bw = tf.nn.rnn_cell.MultiRNNCell([self.lstm_cell_bw] * self.nums_layers)
+        # 计算每个句子的长度
         self.length = tf.reduce_sum(tf.sign(self.input_ids), axis=1)
         self.length = tf.cast(self.length, dtype=tf.int32)
-        int_states, final_states = tf.nn.bidirectional_dynamic_rnn(self.lstm_cell_fw, self.lstm_cell_bw, self.input,
-                                                                   sequence_length=self.length, dtype=tf.float32,
-                                                                   scope=self.scope)
-        self.output = tf.concat(values=int_states, axis=2)
+        # outputs: A tuple (output_fw, output_bw) containing the forward and the backward rnn output
+        # output_fw: shape=(batch_size, max_time, cell_fw.output_size)
+        outputs, output_states = tf.nn.bidirectional_dynamic_rnn(
+            self.lstm_cell_fw,
+            self.lstm_cell_bw,
+            self.input,
+            sequence_length=self.length,
+            dtype=tf.float32,
+            scope=self.scope
+        )
+        self.output = tf.concat(values=outputs, axis=2)
         if self.state:
-            return self.output, final_states
+            return self.output, output_states
         else:
             return self.output
-
 
 
 class TimeDistributed(object):
@@ -243,6 +261,16 @@ class TimeDistributed(object):
         self.name = name
 
     def __call__(self, input_t, input_ids=None, pad=None):
+        """
+
+        :param input_t: rnn_out
+        :param input_ids:
+        :param pad:
+        :return:
+        """
+        # 在时间序列维度上 unpack，对每个时刻 RNN 的输出应用 layer()，
+        # 然后在时间序列维度上 pack 回去
+        # tf.unstack: Unpacks the given dimension of a rank-R tensor into rank-(R-1) tensors.
         self.input = tf.unstack(input_t, axis=1)
         if input_ids is None:
             self.out = [self.layer(splits) for splits in self.input]
