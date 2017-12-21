@@ -114,7 +114,7 @@ if args.action == 'train':
     else:
         assert args.pixels
 
-    # 读取偏旁部首信息
+    # 读取偏旁部首字典
     rad_dic = None
     if args.radical:
         print 'Using Radical dictionary...'

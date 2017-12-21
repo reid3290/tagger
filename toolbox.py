@@ -307,14 +307,29 @@ def update_gram_dicts(gram2idx, new_grams):
 
 
 def get_radical_dic(path='radical.txt'):
-    rad_dic= {}
+    """
+    读取偏旁部首字典
+    :param path: 字典文件路径
+    :return: a python dictionary, key 是 unicode 码，value 是字符
+    """
+    rad_dic = {}
     for line in codecs.open(path, 'r', encoding='utf-8'):
         line = line.strip()
+        # ord 函数返回字符的 unicode 码
         rad_dic[ord(line)] = line
     return rad_dic
 
 
 def get_radical_idx(ch, rad_dic, keys=None):
+    """
+    给定一个汉字，从偏旁部首字典中找到对应部首的 unicode 码
+    基本思想是，汉字的 unicode 编码是按照偏旁部首顺序来编码的，
+    仔细查看汉字的 unicode 码表即可找出规律
+    :param ch:  目标汉字
+    :param rad_dic:  部首字典，key=unicode 码，value=部首字符
+    :param keys: sorted(rad_dic.keys())
+    :return: 对应部首的 unicode 码
+    """
     if keys is None:
         keys = rad_dic.keys()
         keys = sorted(keys)

@@ -13,8 +13,9 @@ import math
 
 
 class Model(object):
-    def __init__(self, window_size, filters_number, nums_chars, nums_tags, buckets_char, counts=None, pic_size=None, font=None, batch_size=10,
-                 tag_scheme='BIES', word_vec=True, radical=False, graphic=False, crf=1, ngram=None, metric='F1-score'):
+    def __init__(self, window_size, filters_number, nums_chars, nums_tags, buckets_char, counts=None, pic_size=None,
+                 font=None, batch_size=10, tag_scheme='BIES', word_vec=True, radical=False, graphic=False, crf=1,
+                 ngram=None, metric='F1-score'):
         self.window_size = window_size
         self.filters_number = filters_number
         # 字符种类数目
@@ -28,6 +29,7 @@ class Model(object):
         self.tag_scheme = tag_scheme
         self.graphic = graphic
         self.word_vec = word_vec
+        # 是否使用偏旁部首信息
         self.radical = radical
         # 默认为1，即使用一阶条件随机场
         self.crf = crf
@@ -40,7 +42,7 @@ class Model(object):
         self.batch_size = batch_size
         self.l_rate = None
         self.decay = None
-        self.train_step = None
+        self.train_steps = None
         self.saver = None
         self.decode_holders = None
         self.scores = None
@@ -81,6 +83,7 @@ class Model(object):
         # 一个 bucket 就是一个 batch，如果 bucket 中句子的个数小于设定的 batch_size，则对应 batch 的大小就是 bucket 中的句子个数，否则是 batch_size。
         # 即限制了 batch 最大为 batch_size
         self.real_batches = toolbox.get_real_batch(self.counts, self.batch_size)
+        self.losses = []
 
     def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, rad_dim=30, emb=None,
                    ng_embs=None, pixels=None, con_width=None, filters=None, pooling_size=None):
@@ -183,6 +186,7 @@ class Model(object):
 
         # define model for each bucket
         # 每一个 bucket 中的句子长度不一样，所以需要定义单独的模型
+        # bucket: bucket 中的句子长度
         for idx, bucket in enumerate(self.buckets_char):
             if idx == 1:
                 # scope 是 tf.variable_scope("tagger", reuse=None, initializer=initializer)
@@ -191,23 +195,24 @@ class Model(object):
 
             # 输入的句子，one-hot 向量
             # shape = （batch_size, 句子长度）
-            input_v = tf.placeholder(tf.int32, [None, bucket], name='input_' + str(bucket))
+            input_sentences = tf.placeholder(tf.int32, [None, bucket], name='input_' + str(bucket))
 
-            self.input_v.append([input_v])
+            self.input_v.append([input_sentences])
 
             emb_set = []
 
             if self.word_vec:
                 # 根据 one-hot 向量查找对应的字向量
                 # word_out: shape=(batch_size, 句子长度，字向量维度（64）)
-                word_out = self.emb_layer(input_v)
+                word_out = self.emb_layer(input_sentences)
                 emb_set.append(word_out)
 
             if self.radical:
-                input_r = tf.placeholder(tf.int32, [None, bucket], name='input_r' + str(bucket))
+                # 嵌入偏旁部首信息，shape = (batch_size, 句子长度)
+                input_radicals = tf.placeholder(tf.int32, [None, bucket], name='input_r' + str(bucket))
 
-                self.input_v[-1].append(input_r)
-                radical_out = self.radical_layer(input_r)
+                self.input_v[-1].append(input_radicals)
+                radical_out = self.radical_layer(input_radicals)
                 emb_set.append(radical_out)
 
             if self.ngram is not None:
@@ -238,14 +243,6 @@ class Model(object):
 
                 emb_set.append(graphic_out)
 
-            # TODO: 改作用 CNN 提取字向量信息，就需要改 emb_out 的值
-            if len(emb_set) > 1:
-                # 各种字向量直接 concat 起来（字向量、偏旁部首、n-gram、图像信息等）
-                emb_out = tf.concat(axis=2, values=emb_set)
-
-            else:
-                emb_out = emb_set[0]
-
             if self.window_size > 1:
 
                 padding_size = int(np.floor(self.window_size / 2))
@@ -273,11 +270,17 @@ class Model(object):
 
                 z = tf.stack(z, axis=1)
                 values, indices = tf.nn.top_k(z, sorted=False, k=emb_dim)
-                emb_out = values
+                emb_set.append(values)
+            if len(emb_set) > 1:
+                # 各种字向量直接 concat 起来（字向量、偏旁部首、n-gram、图像信息等）
+                emb_out = tf.concat(axis=2, values=emb_set)
+
+            else:
+                emb_out = emb_set[0]
 
             # rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
             rnn_out = BiLSTM(rnn_dim, fw_cell=fw_rnn_cell, bw_cell=bw_rnn_cell, p=dr,
-                             name='BiLSTM' + str(bucket), scope='BiRNN')(emb_out, input_v)
+                             name='BiLSTM' + str(bucket), scope='BiRNN')(emb_out, input_sentences)
 
             # 应用全连接层，Wx+b 得到最后的输出
             output = output_wrapper(rnn_out)
@@ -314,21 +317,20 @@ class Model(object):
         print 'Training preparation...'
 
         print 'Defining loss...'
-        loss = []
         if self.crf > 0:
             loss_function = losses.crf_loss
 
             for i in range(len(self.input_v)):
-                # 根据第 i 个 bucket 的输出和 ground truth，用以 CRF 损失函数，计算损失函数值
+                # 根据第 i 个 bucket 的输出和 ground truth，用 CRF 损失函数，计算损失函数值
                 bucket_loss = losses.loss_wrapper(self.output[i], self.output_[i], loss_function,
                                                   transitions=self.transition_char, nums_tags=self.nums_tags,
                                                   batch_size=self.real_batches[i])
-                loss.append(bucket_loss)
+                self.losses.append(bucket_loss)
         else:
             loss_function = losses.sparse_cross_entropy
             for output, output_ in zip(self.output, self.output_):
                 bucket_loss = losses.loss_wrapper(output, output_, loss_function)
-                loss.append(bucket_loss)
+                self.losses.append(bucket_loss)
 
         l_rate = tf.placeholder(tf.float32, [], name='learning_rate_holder')
         self.l_rate = l_rate
@@ -346,11 +348,11 @@ class Model(object):
         else:
             raise Exception('optimiser error')
 
-        self.train_step = []
+        self.train_steps = []
 
         print 'Computing gradients...'
 
-        for idx, l in enumerate(loss):
+        for idx, l in enumerate(self.losses):
             t2 = time()
             if clipping:
                 gradients = tf.gradients(l, self.params)
@@ -359,7 +361,7 @@ class Model(object):
             else:
                 train_step = optimizer.minimize(l)
             print 'Bucket %d, %f seconds' % (idx + 1, time() - t2)
-            self.train_step.append(train_step)
+            self.train_steps.append(train_step)
 
     def decode_graph(self):
         self.decode_holders = []
@@ -484,9 +486,10 @@ class Model(object):
                 # sess[0] 是 main_sess, sess[1] 是 decode_sess(如果使用 CRF 的话)
                 # 训练当前的 bucket，这个函数里面才真正地为模型填充了数据并运行(以 real_batch_size 为单位，将 bucket 中的句子依次喂给模型)
                 # 被 sess.run 的是 config=self.train_step[idx]，train_step[idx] 就会触发 BP 更新参数了
-                Batch.train(sess=sess[0], model=model, batch_size=real_batch_size, config=self.train_step[idx],
+                Batch.train(sess=sess[0], placeholders=model, batch_size=real_batch_size, train_step=self.train_steps[idx],
+                            loss=self.losses[idx],
                             lr=self.l_rate, lrv=lr_r, dr=self.drop_out, drv=self.drop_out_v, data=list(sample),
-                            pt_h=pt_holder, pixels=self.pixels, verbose=False)
+                            pt_h=pt_holder, pixels=self.pixels, verbose=True)
 
             predictions = []
             # 遍历每个 bucket, 用开发集测试准确率

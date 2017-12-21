@@ -40,7 +40,8 @@ def sparse_cross_entropy_with_weights(y, y_, weights= None, average_cross_steps=
         return out*weights
 
 
-def sequence_loss_by_example(logits, targets, weights=None, average_across_timesteps=True, softmax_loss_function=None, name=None):
+def sequence_loss_by_example(logits, targets, weights=None, average_across_timesteps=True,
+                             softmax_loss_function=None, name=None):
     """Weighted cross-entropy loss for a sequence of logits (per example).
     Args:
     logits: List of 2D Tensors of shape [batch_size x num_decoder_symbols].
@@ -78,7 +79,7 @@ def crf_loss(y, y_, transitions, nums_tags, batch_size):
     """
     计算 CRF 损失函数值
     :param y: 预测值，shape = (batch_size, 句子长度，标签数量)，即每个句子中各个字符对应的标签概率
-    :param y_: ground truth，shape=(batch_size, 标签数量)
+    :param y_: ground truth，shape=(batch_size, 句子长度)
     :param transitions: 标签转移矩阵, shape=(标签数量+1， 标签数量+1)
     :param nums_tags: 标签数量
     :param batch_size:  real batch size
@@ -87,12 +88,18 @@ def crf_loss(y, y_, transitions, nums_tags, batch_size):
     tag_scores = y
     # 句子长度，即解码步数
     nums_steps = len(tf.unstack(tag_scores, axis=1))
+    # shape = (batch_size, 句子长度)
     masks = tf.cast(tf.sign(y_), dtype=tf.float32)
     lengths = tf.reduce_sum(tf.sign(y_), axis=1)
     tag_ids = y_
+    # shape = (batch_size, 1)，实际上就是将 a list of arrays/tensors 变成一个 tensor
     b_id = tf.stack([[nums_tags]] * batch_size)
-    #e_id = tf.pack([[0]] * batch_size)
+    # e_id = tf.pack([[0]] * batch_size)
+    # shape=(batch_size, 句子长度+1)，因为 tag_ids.shape=(batch_size, 句子长度), b_id.shape=(batch_size, 1)
     padded_tag_ids = tf.concat(axis=1, values=[b_id, tag_ids])
+    # tf.slice() 的作用是将输入标签序列中的每个标签两两成对切开，表示的就是标签间的转移关系
+    # 每一个 slice 得到的是 shape=(batch_size, 2) 的 tensor，总共有 nums_steps 个，stack 到一个 tensor 里得到
+    # shape = (batch_size, 句子长度，2)
     idx_tag_ids = tf.stack([tf.slice(padded_tag_ids, [0, i], [-1, 2]) for i in range(nums_steps)], axis=1)
     tag_ids = tf.contrib.layers.one_hot_encoding(tag_ids, nums_tags)
     point_score = tf.reduce_sum(tag_scores * tag_ids, axis=2)
