@@ -226,9 +226,12 @@ class BiLSTM(object):
         """
         self.input = input_t
         self.input_ids = input_ids
+        self.lstm_cell_fw = tf.contrib.rnn.AttentionCellWrapper(self.lstm_cell_fw, 5)
+        self.lstm_cell_bw = tf.contrib.rnn.AttentionCellWrapper(self.lstm_cell_bw, 5)
         # if self.p > 0.:
         self.lstm_cell_fw = tf.nn.rnn_cell.DropoutWrapper(self.lstm_cell_fw, output_keep_prob=(1 - self.p))
         self.lstm_cell_bw = tf.nn.rnn_cell.DropoutWrapper(self.lstm_cell_bw, output_keep_prob=(1 - self.p))
+
         if self.nums_layers > 1:
             self.lstm_cell_fw = tf.nn.rnn_cell.MultiRNNCell([self.lstm_cell_fw] * self.nums_layers)
             self.lstm_cell_bw = tf.nn.rnn_cell.MultiRNNCell([self.lstm_cell_bw] * self.nums_layers)
