@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 #****************************************************************
 #
 # evaluate.py - the evaluation program.
@@ -386,6 +387,13 @@ def readNonEmptySentenceList(sents, bIgnoreNoneTag=True):
 
 
 def score(sReference, sCandidate, tag_num=1, verbose=False):
+    """
+    :param sReference: 标准答案
+    :param sCandidate: 标注结果
+    :param tag_num: 标签总数量
+    :param verbose:
+    :return:
+    """
     nTotalCorrectWords = 0
     nTotalCorrectTags = 0
     nTotalPrediction = 0

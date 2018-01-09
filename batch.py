@@ -2,15 +2,18 @@
 import random
 import toolbox
 import numpy as np
+import datetime
 
 
-def train(sess, model, batch_size, config, lr, lrv, data, dr=None, drv=None, pixels=None, pt_h=None, verbose=False):
+def train(sess, placeholders, batch_size, train_step, loss,
+          lr, lrv, data, dr=None, drv=None, pixels=None, pt_h=None, verbose=False):
     """
     训练单个 bucket 的模型
+    :param loss:
     :param sess: tf.Session
-    :param model: [tf.placeholder]，总共5个，表示一个句子的字符本身、偏旁部首、2gram、3gram、对应标签
+    :param placeholders: [tf.placeholder]，总共5个，表示一个句子的字符本身、偏旁部首、2gram、3gram、对应标签
     :param batch_size:
-    :param config: 目标 bucket 的 train_step, optimizer.apply_gradients()
+    :param train_step: 目标 bucket 的 train_step, optimizer.apply_gradients()
     :param lr: 初始学习率
     :param lrv: 衰减后的学习率
     :param data: 当前 bucket 中的所有句子，shape=(5, bucket 中句子数量，句子长度)
@@ -21,20 +24,25 @@ def train(sess, model, batch_size, config, lr, lrv, data, dr=None, drv=None, pix
     :param verbose:
     """
     # len(data)=5，表示一个句子的字符本身、偏旁部首、2gram、3gram、对应标签
-    assert len(data) == len(model)
+    lm_targets = []
+    for sentence in data[0]:
+        lm_target = np.append(sentence[1:],0)
+        lm_targets.append(lm_target)
+    data.append(lm_targets)
+    assert len(data) == len(placeholders)
     num_items = len(data)
     samples = zip(*data)
     random.shuffle(samples)
     start_idx = 0
     n_samples = len(samples)
-    model.append(lr)
+    placeholders.append(lr)
     if dr is not None:
-        model.append(dr)
+        placeholders.append(dr)
     if pixels is not None:
-        model.append(pt_h)
+        placeholders.append(pt_h)
     while start_idx < len(samples):
         if verbose:
-            print '%d' % (start_idx * 100 / n_samples) + '%'
+            print '%s : %d of %d' % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), start_idx, n_samples)
         next_batch_samples = samples[start_idx:start_idx + batch_size]
         real_batch_size = len(next_batch_samples)
         if real_batch_size < batch_size:
@@ -48,7 +56,8 @@ def train(sess, model, batch_size, config, lr, lrv, data, dr=None, drv=None, pix
         if pixels is not None:
             pt_ids = [s[0] for s in next_batch_samples]
             holders.append(toolbox.get_batch_pixels(pt_ids, pixels))
-        sess.run(config, feed_dict={m: h for m, h in zip(model, holders)})
+        feed_dict = {m: h for m, h in zip(placeholders, holders)}
+        _, loss_value = sess.run([train_step, loss], feed_dict=feed_dict)
         start_idx += batch_size
 
 

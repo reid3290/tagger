@@ -114,7 +114,7 @@ if args.action == 'train':
     else:
         assert args.pixels
 
-    # 读取偏旁部首信息
+    # 读取偏旁部首字典
     rad_dic = None
     if args.radical:
         print 'Using Radical dictionary...'
@@ -236,7 +236,7 @@ if args.action == 'train':
         model.train(t_x=b_train_x, t_y=b_train_y, v_x=b_dev_x, v_y=b_dev_y, idx2tag=idx2tag, idx2char=idx2char,
                     sess=sess, epochs=args.epochs, trained_model=path + '/' + model_file + '_weights',
                     lr=args.learning_rate, decay=args.decay_rate, tag_num=len(tags))
-        print 'Done. Time consumed: %d seconds' % int(time() - t)
+        print 'Done. Time consumed: %f hours' % int(time() - t)/60.0/60.0
 
 else:
 
