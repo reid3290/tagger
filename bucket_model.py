@@ -63,6 +63,10 @@ class Model(object):
         self.output_p = []
         self.output_w = []
         self.output_w_ = []
+
+        self.lm_output = []
+        self.lm_output_ = []
+
         # 使用 viterbi 解码
         if self.crf > 0:
             self.transition_char = []
@@ -302,11 +306,92 @@ class Model(object):
 
             self.bucket_dit[bucket] = idx
 
+            # language model
+            lm_rnn_dim = rnn_dim
+            with tf.variable_scope('LM-BiRNN'):
+                if gru:
+                    lm_fw_rnn_cell = tf.nn.rnn_cell.GRUCell(lm_rnn_dim)
+                    lm_bw_rnn_cell = tf.nn.rnn_cell.GRUCell(lm_rnn_dim)
+                else:
+                    lm_fw_rnn_cell = tf.nn.rnn_cell.LSTMCell(lm_rnn_dim, state_is_tuple=True)
+                    lm_bw_rnn_cell = tf.nn.rnn_cell.LSTMCell(lm_rnn_dim, state_is_tuple=True)
+
+                if rnn_num > 1:
+                    lm_fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([lm_fw_rnn_cell] * rnn_num, state_is_tuple=True)
+                    lm_bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([lm_bw_rnn_cell] * rnn_num, state_is_tuple=True)
+            lm_rnn_out = BiLSTM(lm_rnn_dim, fw_cell=lm_fw_rnn_cell, bw_cell=lm_bw_rnn_cell, p=dr,
+                                name='LM-BiLSTM' + str(bucket), scope='LM-BiRNN')(emb_set[0], input_sentences)
+
+            lm_output_wrapper = TimeDistributed(
+                HiddenLayer(lm_rnn_dim * 2, self.nums_chars+1, activation='linear', name='lm_hidden'),
+                name='lm_wrapper')
+            lm_out = lm_output_wrapper(lm_rnn_out)
+            self.lm_output.append([lm_out])
+            self.lm_output_.append([tf.placeholder(tf.int32, [None, bucket], name='lm_targets' + str(bucket))])
+            # lm_config = {
+            #     "init_scale": 0.1,
+            #     "learning_rate": 1.0,
+            #     "max_grad_norm": 5,
+            #     "num_layers": 2,
+            #     "num_steps": 20,
+            #     "hidden_size": 200,
+            #     "max_epoch": 4,
+            #     "max_max_epoch": 13,
+            #     "keep_prob": 1.0,
+            #     "lr_decay": 0.5,
+            #     "batch_size": 20,
+            #     "vocab_size": 10000,
+            #     "rnn_mode": "CUDNN",
+            # }
+            # cell = tf.contrib.rnn.BasicLSTMCell(
+            #     lm_config["hidden_size"], forget_bias=0.0, state_is_tuple=True,
+            #     reuse=False)
+            # cell = tf.contrib.rnn.DropoutWrapper(
+            #     cell, output_keep_prob=lm_config["keep_prob"])
+            #
+            # cell = tf.contrib.rnn.MultiRNNCell(
+            #     [cell for _ in range(lm_config["num_layers"])], state_is_tuple=True)
+            #
+            # self._initial_lm_state = cell.zero_state(lm_config["batch_size"], tf.float32)
+            #
+            # lm_inputs = tf.unstack(emb_set[0], num=num_steps, axis=1)
+            # lm_outputs, lm_state = tf.contrib.rnn.static_rnn(cell, lm_inputs,
+            #                                                  initial_state=self._initial_lm_state)
+            #
+            # lm_output = tf.reshape(tf.concat(lm_outputs, 1), [-1, lm_config["hidden_size"]])
+            # lm_softmax_w = tf.get_variable(
+            #     "softmax_w", [size, vocab_size], tf.float32)
+            # lm_softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=tf.float32)
+            # lm_logits = tf.nn.xw_plus_b(output, lm_softmax_w, lm_softmax_b)
+            # # Reshape logits to be a 3-D tensor for sequence loss
+            # lm_logits = tf.reshape(lm_logits, [self.batch_size, self.num_steps, vocab_size])
+            #
+            # # Use the contrib sequence loss and average over the batches
+            # lm_loss = tf.contrib.seq2seq.sequence_loss(
+            #     lm_logits,
+            #     input_.targets,
+            #     tf.ones([self.batch_size, self.num_steps], tf.float32),
+            #     average_across_timesteps=False,
+            #     average_across_batch=True)
+            #
+            # # Update the cost
+            # self._lm_cost = tf.reduce_sum(lm_loss)
+            # self._final_lm_state = lm_state
+            #
+            # tvars = tf.trainable_variables()
+            # lm_grads, _ = tf.clip_by_global_norm(tf.gradients(self._lm_cost, tvars),
+            #                                      lm_config["max_grad_norm"])
+            # optimizer = tf.train.GradientDescentOptimizer(self._lr)
+            # self._lm_train_op = optimizer.apply_gradients(
+            #     zip(lm_grads, tvars),
+            #     global_step=tf.contrib.framework.get_or_create_global_step())
+
             print 'Bucket %d, %f seconds' % (idx + 1, time() - t1)
 
         assert \
             len(self.input_v) == len(self.output) and \
             len(self.output) == len(self.output_) and \
+            len(self.lm_output) == len(self.lm_output_) and \
             len(self.output) == len(self.counts)
 
         self.params = tf.trainable_variables()
@@ -333,7 +418,8 @@ class Model(object):
 
             for i in range(len(self.input_v)):
                 # 根据第 i 个 bucket 的输出和 ground truth，用 CRF 损失函数，计算损失函数值
-                bucket_loss = losses.loss_wrapper(self.output[i], self.output_[i], loss_function,
+                bucket_loss = losses.loss_wrapper(self.output[i], self.output_[i], self.lm_output[i],
+                                                  self.lm_output_[i], loss_function,
                                                   transitions=self.transition_char, nums_tags=self.nums_tags,
                                                   batch_size=self.real_batches[i])
                 self.losses.append(bucket_loss)
@@ -490,14 +576,15 @@ class Model(object):
                 idx = self.bucket_dit[c_len]
                 real_batch_size = self.real_batches[idx]
                 # 当前 bucket 的模型的输入和输出（注意每个 bucket 都有一个单独的模型）
-                model = self.input_v[idx] + self.output_[idx]
+                model = self.input_v[idx] + self.output_[idx]  + self.lm_output_[idx]
                 pt_holder = None
                 if self.graphic:
                     pt_holder = self.input_p[idx]
                 # sess[0] 是 main_sess, sess[1] 是 decode_sess(如果使用 CRF 的话)
                 # 训练当前的 bucket，这个函数里面才真正地为模型填充了数据并运行(以 real_batch_size 为单位，将 bucket 中的句子依次喂给模型)
                 # 被 sess.run 的是 config=self.train_step[idx]，train_step[idx] 就会触发 BP 更新参数了
-                Batch.train(sess=sess[0], placeholders=model, batch_size=real_batch_size, train_step=self.train_steps[idx],
+                Batch.train(sess=sess[0], placeholders=model, batch_size=real_batch_size,
+                            train_step=self.train_steps[idx],
                             loss=self.losses[idx],
                             lr=self.l_rate, lrv=lr_r, dr=self.drop_out, drv=self.drop_out_v, data=list(sample),
                             pt_h=pt_holder, pixels=self.pixels, verbose=True)

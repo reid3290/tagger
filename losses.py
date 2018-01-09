@@ -75,7 +75,7 @@ def sequence_loss_by_example(logits, targets, weights=None, average_across_times
     return log_perps
 
 
-def crf_loss(y, y_, transitions, nums_tags, batch_size):
+def crf_loss(y, y_, ly, ly_, transitions, nums_tags, batch_size):
     """
     计算 CRF 损失函数值
     :param y: 预测值，shape = (batch_size, 句子长度，标签数量)，即每个句子中各个字符对应的标签概率
@@ -116,16 +116,16 @@ def crf_loss(y, y_, transitions, nums_tags, batch_size):
     trans_score *= extend_mask
     target_path_score = tf.reduce_sum(point_score) + tf.reduce_sum(trans_score)
     total_path_score, _, _ = Forward(tag_scores, transitions, nums_tags, lengths, batch_size)()
-    return - (target_path_score - total_path_score)
+    return - (target_path_score - total_path_score) + sparse_cross_entropy(ly, ly_)
 
 
-def loss_wrapper(y, y_, loss_function, transitions=None, nums_tags=None, batch_size=None, weights=None, average_cross_steps=True):
+def loss_wrapper(y, y_, lm_y, lm_y_, loss_function, transitions=None, nums_tags=None, batch_size=None, weights=None, average_cross_steps=True):
     assert len(y) == len(y_)
     total_loss = []
     if loss_function is crf_loss:
         assert len(y) == len(transitions) and len(transitions) == len(nums_tags) and batch_size is not None
-        for sy, sy_, stranstion, snums_tags in zip(y, y_, transitions, nums_tags):
-            total_loss.append(loss_function(sy, sy_, stranstion, snums_tags, batch_size))
+        for sy, sy_, ly, ly_, stranstion, snums_tags in zip(y, y_, lm_y, lm_y_, transitions, nums_tags):
+            total_loss.append(loss_function(sy, sy_, ly, ly_, stranstion, snums_tags, batch_size))
     elif loss_function is cross_entropy:
         assert len(y) == len(nums_tags)
         for sy, sy_, snums_tags in zip(y, y_, nums_tags):

@@ -24,6 +24,11 @@ def train(sess, placeholders, batch_size, train_step, loss,
     :param verbose:
     """
     # len(data)=5，表示一个句子的字符本身、偏旁部首、2gram、3gram、对应标签
+    lm_targets = []
+    for sentence in data[0]:
+        lm_target = np.append(sentence[1:],0)
+        lm_targets.append(lm_target)
+    data.append(lm_targets)
     assert len(data) == len(placeholders)
     num_items = len(data)
     samples = zip(*data)
@@ -51,7 +56,8 @@ def train(sess, placeholders, batch_size, train_step, loss,
         if pixels is not None:
             pt_ids = [s[0] for s in next_batch_samples]
             holders.append(toolbox.get_batch_pixels(pt_ids, pixels))
-        _, loss_value = sess.run([train_step, loss], feed_dict={m: h for m, h in zip(placeholders, holders)})
+        feed_dict = {m: h for m, h in zip(placeholders, holders)}
+        _, loss_value = sess.run([train_step, loss], feed_dict=feed_dict)
         start_idx += batch_size
 
 
