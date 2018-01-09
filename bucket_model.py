@@ -250,8 +250,8 @@ class Model(object):
 
                 Ws = []
                 for q in range(1, self.window_size + 1):
-                    Ws.append(tf.Variable(tf.truncated_normal([q * emb_dim, self.filters_number], stddev=0.1), name="W_%d" % q))
-                b = tf.Variable(tf.constant(0.1, shape=[self.filters_number]), name="b")
+                    Ws.append(tf.get_variable("W_%d" % q, shape=[q * emb_dim, self.filters_number]))
+                b = tf.get_variable("b", shape=[self.filters_number])
 
                 z = [None for _ in range(0, bucket)]
 
@@ -270,7 +270,18 @@ class Model(object):
 
                 z = tf.stack(z, axis=1)
                 values, indices = tf.nn.top_k(z, sorted=False, k=emb_dim)
-                emb_set.append(values)
+
+                # highway layer
+                X = tf.unstack(word_out, axis=1)
+                Conv_X = tf.unstack(values, axis=1)
+                X_hat = []
+                W_t = tf.get_variable("W_t", shape=[emb_dim, emb_dim])
+                b_t = tf.get_variable("b_t", shape=[emb_dim])
+                for x, conv_x in zip(X, Conv_X):
+                    T_x = tf.sigmoid(tf.nn.xw_plus_b(x, W_t, b_t))
+                    X_hat.append(tf.multiply(conv_x, T_x) + tf.multiply(x, 1 - T_x))
+                X_hat = tf.stack(X_hat, axis=1)
+                emb_set.append(X_hat)
             if len(emb_set) > 1:
                 # 各种字向量直接 concat 起来（字向量、偏旁部首、n-gram、图像信息等）
                 emb_out = tf.concat(axis=2, values=emb_set)
