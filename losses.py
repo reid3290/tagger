@@ -116,7 +116,10 @@ def crf_loss(y, y_, ly, ly_, transitions, nums_tags, batch_size):
     trans_score *= extend_mask
     target_path_score = tf.reduce_sum(point_score) + tf.reduce_sum(trans_score)
     total_path_score, _, _ = Forward(tag_scores, transitions, nums_tags, lengths, batch_size)()
-    return - (target_path_score - total_path_score) + sparse_cross_entropy(ly, ly_)
+    tagging_loss = - (target_path_score - total_path_score)
+    lm_loss = tf.reduce_sum(sparse_cross_entropy(ly, ly_) * masks)
+    return lm_loss
+    # return tagging_loss + lm_loss
 
 
 def loss_wrapper(y, y_, lm_y, lm_y_, loss_function, transitions=None, nums_tags=None, batch_size=None, weights=None, average_cross_steps=True):
