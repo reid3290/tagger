@@ -323,7 +323,7 @@ class Model(object):
                                 name='LM-BiLSTM' + str(bucket), scope='LM-BiRNN')(emb_set[0], input_sentences)
 
             lm_output_wrapper = TimeDistributed(
-                HiddenLayer(lm_rnn_dim * 2, self.nums_chars+1, activation='linear', name='lm_hidden'),
+                HiddenLayer(lm_rnn_dim * 2, self.nums_chars + 1, activation='linear', name='lm_hidden'),
                 name='lm_wrapper')
             lm_out = lm_output_wrapper(lm_rnn_out)
             self.lm_output.append([lm_out])
@@ -576,17 +576,18 @@ class Model(object):
                 idx = self.bucket_dit[c_len]
                 real_batch_size = self.real_batches[idx]
                 # 当前 bucket 的模型的输入和输出（注意每个 bucket 都有一个单独的模型）
-                model = self.input_v[idx] + self.output_[idx]  + self.lm_output_[idx]
+                model_placeholders = self.input_v[idx] + self.output_[idx] + self.lm_output_[idx]
                 pt_holder = None
                 if self.graphic:
                     pt_holder = self.input_p[idx]
                 # sess[0] 是 main_sess, sess[1] 是 decode_sess(如果使用 CRF 的话)
                 # 训练当前的 bucket，这个函数里面才真正地为模型填充了数据并运行(以 real_batch_size 为单位，将 bucket 中的句子依次喂给模型)
                 # 被 sess.run 的是 config=self.train_step[idx]，train_step[idx] 就会触发 BP 更新参数了
-                Batch.train(sess=sess[0], placeholders=model, batch_size=real_batch_size,
+                Batch.train(sess=sess[0], placeholders=model_placeholders, batch_size=real_batch_size,
                             train_step=self.train_steps[idx],
                             loss=self.losses[idx],
                             lr=self.l_rate, lrv=lr_r, dr=self.drop_out, drv=self.drop_out_v, data=list(sample),
+                            debug_variable=[self.lm_output[idx], self.lm_output_[idx], self.output[idx], self.output_[idx]],
                             pt_h=pt_holder, pixels=self.pixels, verbose=True)
 
             predictions = []

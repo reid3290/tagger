@@ -6,9 +6,10 @@ import datetime
 
 
 def train(sess, placeholders, batch_size, train_step, loss,
-          lr, lrv, data, dr=None, drv=None, pixels=None, pt_h=None, verbose=False):
+          lr, lrv, data, debug_variable=None, dr=None, drv=None, pixels=None, pt_h=None, verbose=False):
     """
     训练单个 bucket 的模型
+    :param debug_variable:
     :param loss:
     :param sess: tf.Session
     :param placeholders: [tf.placeholder]，总共5个，表示一个句子的字符本身、偏旁部首、2gram、3gram、对应标签
@@ -26,7 +27,7 @@ def train(sess, placeholders, batch_size, train_step, loss,
     # len(data)=5，表示一个句子的字符本身、偏旁部首、2gram、3gram、对应标签
     lm_targets = []
     for sentence in data[0]:
-        lm_target = np.append(sentence[1:],0)
+        lm_target = np.append(sentence[1:], 0)
         lm_targets.append(lm_target)
     data.append(lm_targets)
     assert len(data) == len(placeholders)
@@ -57,7 +58,13 @@ def train(sess, placeholders, batch_size, train_step, loss,
             pt_ids = [s[0] for s in next_batch_samples]
             holders.append(toolbox.get_batch_pixels(pt_ids, pixels))
         feed_dict = {m: h for m, h in zip(placeholders, holders)}
-        _, loss_value = sess.run([train_step, loss], feed_dict=feed_dict)
+        if debug_variable is not None:
+            debug_info = sess.run([train_step, loss] + debug_variable, feed_dict=feed_dict)
+            print debug_info[1]
+            print debug_info[2][0][0][0]
+        else:
+            _, loss_value = sess.run([train_step, loss], feed_dict=feed_dict)
+            print loss_value
         start_idx += batch_size
 
 
