@@ -118,16 +118,20 @@ def crf_loss(y, y_, ly, ly_, transitions, nums_tags, batch_size):
     tagging_loss = - (target_path_score - total_path_score)
     lm_loss = tf.reduce_sum(sparse_cross_entropy(ly, ly_) * masks)
 
-    return tagging_loss + lm_loss
+    return tagging_loss, lm_loss
 
 
 def loss_wrapper(y, y_, lm_y, lm_y_, loss_function, transitions=None, nums_tags=None, batch_size=None, weights=None, average_cross_steps=True):
     assert len(y) == len(y_)
+    total_tagging_loss = []
+    total_lm_loss = []
     total_loss = []
     if loss_function is crf_loss:
         assert len(y) == len(transitions) and len(transitions) == len(nums_tags) and batch_size is not None
         for sy, sy_, ly, ly_, transition, tags in zip(y, y_, lm_y, lm_y_, transitions, nums_tags):
-            total_loss.append(loss_function(sy, sy_, ly, ly_, transition, tags, batch_size))
+            tagging_loss, lm_loss = loss_function(sy, sy_, ly, ly_, transition, tags, batch_size)
+            total_tagging_loss.append(tagging_loss)
+            total_lm_loss.append(lm_loss)
     elif loss_function is cross_entropy:
         assert len(y) == len(nums_tags)
         for sy, sy_, tags in zip(y, y_, nums_tags):
@@ -142,4 +146,4 @@ def loss_wrapper(y, y_, lm_y, lm_y_, loss_function, transitions=None, nums_tags=
     else:
         for sy, sy_ in zip(y, y_):
             total_loss.append(tf.reshape(loss_function(sy, sy_), [-1]))
-    return tf.stack(total_loss)
+    return tf.stack(total_tagging_loss), tf.stack(total_lm_loss)

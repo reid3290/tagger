@@ -10,6 +10,7 @@ import numpy as np
 import random
 import cPickle as pickle
 import math
+import shutil
 
 
 class Model(object):
@@ -367,13 +368,14 @@ class Model(object):
 
             for i in range(len(self.input_v)):
                 # 根据第 i 个 bucket 的输出和 ground truth，用 CRF 损失函数，计算损失函数值
-                bucket_loss = losses.loss_wrapper(self.output[i], self.output_[i], self.lm_predictions[i],
-                                                  self.lm_groundtruthes[i], loss_function,
-                                                  transitions=self.transition_char, nums_tags=self.nums_tags,
-                                                  batch_size=self.real_batches[i])
-                tf.summary.scalar('loss-%s' % i, bucket_loss)
-                self.losses.append(bucket_loss)
-                self.summaries.append(tf.summary.scalar('bucket loss %d' % i, tf.reduce_mean(bucket_loss)))
+                tagging_loss, lm_loss = losses.loss_wrapper(self.output[i], self.output_[i], self.lm_predictions[i],
+                                                            self.lm_groundtruthes[i], loss_function,
+                                                            transitions=self.transition_char, nums_tags=self.nums_tags,
+                                                            batch_size=self.real_batches[i])
+                tagging_loss_summary = tf.summary.scalar('tagging loss %s' % i, tf.reduce_mean(tagging_loss))
+                lm_loss_summary = tf.summary.scalar('language model loss %s' % i, tf.reduce_mean(lm_loss))
+                self.losses.append(tagging_loss + lm_loss)
+                self.summaries.append([tagging_loss_summary, lm_loss_summary])
 
         else:
             loss_function = losses.sparse_cross_entropy
@@ -477,8 +479,9 @@ class Model(object):
         :param decay_step:
         :param tag_num: 标签种类个数
         """
-
-        train_writer = tf.summary.FileWriter('./train_log', sess[0].graph)
+        log_dir = "./train_log"
+        shutil.rmtree(log_dir)
+        train_writer = tf.summary.FileWriter(log_dir, sess[0].graph)
 
         lr_r = lr
 
@@ -548,7 +551,6 @@ class Model(object):
                             pt_h=pt_holder, pixels=self.pixels, verbose=True,
                             merged_summary=self.merged_summary, log_writer=train_writer,
                             single_summary=self.summaries[idx], epoch_index=epoch)
-
 
             predictions = []
             # 遍历每个 bucket, 用开发集测试准确率
