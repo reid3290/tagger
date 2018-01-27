@@ -3,6 +3,7 @@ import random
 import toolbox
 import numpy as np
 import datetime
+import tensorflow as tf
 
 
 def train(sess, placeholders, batch_size, train_step, loss,
@@ -24,6 +25,9 @@ def train(sess, placeholders, batch_size, train_step, loss,
     :param pt_h:
     :param verbose:
     """
+    if debug_variable is not None:
+        session = tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False))
+        np.set_printoptions(threshold=10000)
     # len(data)=5，表示一个句子的字符本身、偏旁部首、2gram、3gram、对应标签
     lm_targets = []
     for sentence in data[0]:
@@ -60,8 +64,26 @@ def train(sess, placeholders, batch_size, train_step, loss,
         feed_dict = {m: h for m, h in zip(placeholders, holders)}
         if debug_variable is not None:
             debug_info = sess.run([train_step, loss] + debug_variable, feed_dict=feed_dict)
-            print debug_info[1]
-            print debug_info[2][0][0][0]
+            # masks = tf.cast(tf.sign(data[0]), dtype=tf.float32)
+            print "data and loss"
+            masks = tf.cast(tf.sign(data[0][0]), dtype=tf.float32)
+            lengths = tf.reduce_sum(tf.sign(data[0][0]), axis=0)
+            print "masks", tf.Tensor.eval(masks, session=session)
+            print "lengths", tf.Tensor.eval(lengths, session=session)
+            for i in range(0, np.min([len(data[0]), len(debug_info[2][0]), len(debug_info[3][0])])):
+                # lm_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=debug_info[2], labels=debug_info[3])
+                for (y, y_) in zip(debug_info[2][0][i], debug_info[3][0][i]):
+                    lm_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=y, labels=y_)
+                    lm_loss_value = tf.Tensor.eval(lm_loss, session=session)
+                    if np.isnan(lm_loss_value) or True:
+                        print "lm_loss:", lm_loss_value
+                        print "y:", np.array2string(y, precision=2, separator=',', suppress_small=True)
+                        print "y_:", y_
+                # print tf.Tensor.eval(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=debug_info[2][0][i], labels=debug_info[3][0][i]), session=tf.Session(config=tf.ConfigProto(allow_soft_placement=True,log_device_placement=False)))
+                # print debug_info[2][0][i][0]
+            # print "debug info"
+            print "total loss:", debug_info[1]
+            # print debug_info[2][0][0][0]
         else:
             _, loss_value = sess.run([train_step, loss], feed_dict=feed_dict)
             print loss_value

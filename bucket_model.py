@@ -323,7 +323,7 @@ class Model(object):
                                 name='LM-BiLSTM' + str(bucket), scope='LM-BiRNN')(emb_set[0], input_sentences)
 
             lm_output_wrapper = TimeDistributed(
-                HiddenLayer(lm_rnn_dim * 2, self.nums_chars + 1, activation='linear', name='lm_hidden'),
+                HiddenLayer(lm_rnn_dim * 2, self.nums_chars+2, activation='linear', name='lm_hidden'),
                 name='lm_wrapper')
             lm_out = lm_output_wrapper(lm_rnn_out)
             self.lm_output.append([lm_out])
@@ -587,7 +587,7 @@ class Model(object):
                             train_step=self.train_steps[idx],
                             loss=self.losses[idx],
                             lr=self.l_rate, lrv=lr_r, dr=self.drop_out, drv=self.drop_out_v, data=list(sample),
-                            debug_variable=[self.lm_output[idx], self.lm_output_[idx], self.output[idx], self.output_[idx]],
+                            # debug_variable=[self.lm_output[idx], self.lm_output_[idx], self.output[idx], self.output_[idx]],
                             pt_h=pt_holder, pixels=self.pixels, verbose=True)
 
             predictions = []
