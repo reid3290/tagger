@@ -6,10 +6,15 @@ import datetime
 import tensorflow as tf
 
 
-def train(sess, placeholders, batch_size, train_step, loss,
-          lr, lrv, data, debug_variable=None, dr=None, drv=None, pixels=None, pt_h=None, verbose=False):
+def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug_variable=None, dr=None, drv=None,
+          pixels=None, pt_h=None, verbose=False, merged_summary=None, log_writer=None, single_summary=None,
+          epoch_index=0):
     """
     训练单个 bucket 的模型
+    :param epoch_index:
+    :param single_summary:
+    :param merged_summary:
+    :param log_writer:
     :param debug_variable:
     :param loss:
     :param sess: tf.Session
@@ -85,8 +90,14 @@ def train(sess, placeholders, batch_size, train_step, loss,
             print "total loss:", debug_info[1]
             # print debug_info[2][0][0][0]
         else:
-            _, loss_value = sess.run([train_step, loss], feed_dict=feed_dict)
-            print loss_value
+            if single_summary is not None and log_writer is not None:
+                loss_value, summary, _ = sess.run([loss, single_summary, train_step], feed_dict=feed_dict)
+                log_step = start_idx + len(samples)*epoch_index
+                print "log step: %d" % log_step
+                log_writer.add_summary(summary, log_step)
+            else:
+                _, loss_value = sess.run([train_step, loss], feed_dict=feed_dict)
+            # print loss_value
         start_idx += batch_size
 
 

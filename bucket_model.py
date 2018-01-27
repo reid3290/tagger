@@ -67,6 +67,8 @@ class Model(object):
         self.lm_output = []
         self.lm_output_ = []
 
+        self.merged_summary = None
+        self.summaries = []
         # 使用 viterbi 解码
         if self.crf > 0:
             self.transition_char = []
@@ -323,7 +325,7 @@ class Model(object):
                                 name='LM-BiLSTM' + str(bucket), scope='LM-BiRNN')(emb_set[0], input_sentences)
 
             lm_output_wrapper = TimeDistributed(
-                HiddenLayer(lm_rnn_dim * 2, self.nums_chars+2, activation='linear', name='lm_hidden'),
+                HiddenLayer(lm_rnn_dim * 2, self.nums_chars + 2, activation='linear', name='lm_hidden'),
                 name='lm_wrapper')
             lm_out = lm_output_wrapper(lm_rnn_out)
             self.lm_output.append([lm_out])
@@ -423,6 +425,8 @@ class Model(object):
                                                   transitions=self.transition_char, nums_tags=self.nums_tags,
                                                   batch_size=self.real_batches[i])
                 self.losses.append(bucket_loss)
+                self.summaries.append(tf.summary.scalar('bucket loss %d' % i, tf.reduce_mean(bucket_loss)))
+
         else:
             loss_function = losses.sparse_cross_entropy
             for output, output_ in zip(self.output, self.output_):
@@ -459,6 +463,8 @@ class Model(object):
                 train_step = optimizer.minimize(l)
             print 'Bucket %d, %f seconds' % (idx + 1, time() - t2)
             self.train_steps.append(train_step)
+
+        self.merged_summary = tf.summary.merge_all()
 
     def decode_graph(self):
         self.decode_holders = []
@@ -523,6 +529,8 @@ class Model(object):
         :param decay_step:
         :param tag_num: 标签种类个数
         """
+        train_writer = tf.summary.FileWriter('./train_log', sess[0].graph)
+
         lr_r = lr
 
         best_epoch, best_score, best_seg, best_pos, c_tag, c_seg, c_score = {}, {}, {}, {}, {}, {}, {}
@@ -588,7 +596,9 @@ class Model(object):
                             loss=self.losses[idx],
                             lr=self.l_rate, lrv=lr_r, dr=self.drop_out, drv=self.drop_out_v, data=list(sample),
                             # debug_variable=[self.lm_output[idx], self.lm_output_[idx], self.output[idx], self.output_[idx]],
-                            pt_h=pt_holder, pixels=self.pixels, verbose=True)
+                            pt_h=pt_holder, pixels=self.pixels, verbose=True,
+                            merged_summary=self.merged_summary, log_writer=train_writer,
+                            single_summary=self.summaries[idx], epoch_index=epoch)
 
             predictions = []
             # 遍历每个 bucket, 用开发集测试准确率
