@@ -76,7 +76,6 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
             print "masks", tf.Tensor.eval(masks, session=session)
             print "lengths", tf.Tensor.eval(lengths, session=session)
             for i in range(0, np.min([len(data[0]), len(debug_info[2][0]), len(debug_info[3][0])])):
-                # lm_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=debug_info[2], labels=debug_info[3])
                 for (y, y_) in zip(debug_info[2][0][i], debug_info[3][0][i]):
                     lm_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=y, labels=y_)
                     lm_loss_value = tf.Tensor.eval(lm_loss, session=session)
@@ -84,11 +83,9 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
                         print "lm_loss:", lm_loss_value
                         print "y:", np.array2string(y, precision=2, separator=',', suppress_small=True)
                         print "y_:", y_
-                # print tf.Tensor.eval(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=debug_info[2][0][i], labels=debug_info[3][0][i]), session=tf.Session(config=tf.ConfigProto(allow_soft_placement=True,log_device_placement=False)))
-                # print debug_info[2][0][i][0]
-            # print "debug info"
+
             print "total loss:", debug_info[1]
-            # print debug_info[2][0][0][0]
+
         else:
             if single_summary is not None and log_writer is not None:
                 loss_value, summary, _ = sess.run([loss, single_summary, train_step], feed_dict=feed_dict)
@@ -97,7 +94,6 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
                 log_writer.add_summary(summary, log_step)
             else:
                 _, loss_value = sess.run([train_step, loss], feed_dict=feed_dict)
-            # print loss_value
         start_idx += batch_size
 
 

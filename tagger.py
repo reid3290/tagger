@@ -10,7 +10,7 @@ import cPickle as pickle
 import codecs
 
 
-parser = argparse.ArgumentParser(description='A tagger for joint Chinese segmentation and POS tagging. Written by Y. Shao, Uppsala University')
+parser = argparse.ArgumentParser(description='A tagger for joint Chinese segmentation and POS tagging.')
 parser.add_argument('action', default='tag', choices=['train', 'test', 'tag'], help='train, test or tag')
 parser.add_argument('-p', '--path', default=None, help='Path of the workstation')
 
@@ -23,7 +23,7 @@ parser.add_argument('-m', '--model', default='trained_model', help='Name of the 
 parser.add_argument('-tg', '--tag_scheme', default='BIES', help='Tagging scheme')
 parser.add_argument('-crf', '--crf', default=1, type=int, help='Using CRF interface')
 
-parser.add_argument('-ws', '--window_size', default=5, type=int, help='The bigest CNN window\'s size')
+parser.add_argument('-ws', '--window_size', default=5, type=int, help='The biggest CNN window\'s size')
 parser.add_argument('-fn', '--filters_number', default=100, type=int, help='CNN filter number')
 
 parser.add_argument('-ng', '--ngram', default=3, type=int, help='Using ngrams')
@@ -49,7 +49,7 @@ parser.add_argument('-layer', '--rnn_layer_number', default=1, type=int, help='N
 parser.add_argument('-dr', '--dropout_rate', default=0.5, type=float, help='Dropout rate')
 
 parser.add_argument('-fs', '--filter_size', default=5, type=int, help='Size of the convolutinal filters')
-# parser.add_argument('-fn', '--filters_number', default=32, type=int, help='Numbers of the convolutional kernels(filters)')
+
 parser.add_argument('-mp', '--max_pooling', default=2, type=int, help='Max pooling size')
 
 parser.add_argument('-iter', '--epochs', default=30, type=int, help='Numbers of epochs')
@@ -93,7 +93,8 @@ if args.action == 'train':
     print 'Reading data......'
 
     # 统计文本信息
-    if args.ngram > 1 and not os.path.isfile(path + '/' + str(args.ngram) + 'gram.txt') or (not os.path.isfile(path + '/' + 'chars.txt')):
+    if args.ngram > 1 and not os.path.isfile(path + '/' + str(args.ngram) + 'gram.txt') \
+            or (not os.path.isfile(path + '/' + 'chars.txt')):
         toolbox.get_vocab_tag(path, [train_file, dev_file], ngram=args.ngram)
     # 读取文本信息
     chars, tags, ngram = toolbox.read_vocab_tag(path, args.ngram)
@@ -132,12 +133,14 @@ if args.action == 'train':
     char2idx, idx2char, tag2idx, idx2tag = toolbox.get_dic(chars, tags)
 
     # train_x: shape=(2,句子数量)，2 表示字符本身+偏旁部首
-    train_x, train_y, train_max_slen_c, train_max_slen_w, train_max_wlen = toolbox.get_input_vec(path, train_file, char2idx, tag2idx, rad_dic=rad_dic, tag_scheme=args.tag_scheme)
-    dev_x, dev_y, dev_max_slen_c, dev_max_slen_w, dev_max_wlen = toolbox.get_input_vec(path, dev_file, char2idx, tag2idx, rad_dic=rad_dic, tag_scheme=args.tag_scheme)
+    train_x, train_y, train_max_slen_c, train_max_slen_w, train_max_wlen = \
+        toolbox.get_input_vec(path, train_file, char2idx, tag2idx, rad_dic=rad_dic, tag_scheme=args.tag_scheme)
+    dev_x, dev_y, dev_max_slen_c, dev_max_slen_w, dev_max_wlen = \
+        toolbox.get_input_vec(path, dev_file, char2idx, tag2idx, rad_dic=rad_dic, tag_scheme=args.tag_scheme)
 
     # 读取 ngram 向量
     nums_grams = None
-    ng_embs = None
+    ng_embeddings = None
 
     if args.ngram > 1:
         gram2idx = toolbox.get_ngram_dic(ngram)
@@ -155,7 +158,7 @@ if args.action == 'train':
             short_ng_emb = args.ngram_embeddings[args.ngram_embeddings.index('/') + 1:]
             if not os.path.isfile(path + '/' + short_ng_emb + '_' + str(args.ngram) + 'gram_sub.txt'):
                 toolbox.get_ngram_embedding(path, args.ngram_embeddings, ngram)
-            ng_embs = toolbox.read_ngram_embedding(path, short_ng_emb, args.ngram)
+            ng_embeddings = toolbox.read_ngram_embedding(path, short_ng_emb, args.ngram)
 
     tag_map = {'seg': 0, 'BI': 1, 'BIE': 2, 'BIES': 3}
 
@@ -202,7 +205,11 @@ if args.action == 'train':
                           pic_size=args.picture_size, radical=args.radical, crf=args.crf, ngram=nums_grams,
                           batch_size=args.train_batch, metric=args.op_metric)
             # 构建 graph，即字符输入=>字向量=>BiLSTM=>全连接层的整个模型图
-            model.main_graph(trained_model=path + '/' + model_file + '_model', scope=scope, emb_dim=emb_dim, gru=args.gru, rnn_dim=args.rnn_cell_dimension, rnn_num=args.rnn_layer_number, emb=emb, ng_embs=ng_embs, drop_out=args.dropout_rate, pixels=pixels, rad_dim=args.radical_dimension, con_width=args.filter_size, filters=args.filters_number, pooling_size=args.max_pooling)
+            model.main_graph(trained_model=path + '/' + model_file + '_model', scope=scope, emb_dim=emb_dim,
+                             gru=args.gru, rnn_dim=args.rnn_cell_dimension, rnn_num=args.rnn_layer_number,
+                             emb=emb, ngram_embedding=ng_embeddings, drop_out=args.dropout_rate, pixels=pixels,
+                             rad_dim=args.radical_dimension, con_width=args.filter_size, filters=args.filters_number,
+                             pooling_size=args.max_pooling)
         t = time()
         # 根据指定参数策略计算损失函数，计算梯度，应用梯度下降
         model.config(optimizer=args.optimizer, decay=args.decay_rate,
@@ -327,7 +334,8 @@ else:
 
         char2idx, idx2char, unk_char2idx = toolbox.update_char_dict(char2idx, new_chars, valid_chars)
 
-        test_x, test_y, test_max_slen_c, test_max_slen_w, test_max_wlen = toolbox.get_input_vec(path, test_file, char2idx, tag2idx, tag_scheme=tag_scheme, rad_dic=rad_dic)
+        test_x, test_y, test_max_slen_c, test_max_slen_w, test_max_wlen = \
+            toolbox.get_input_vec(path, test_file, char2idx, tag2idx, tag_scheme=tag_scheme, rad_dic=rad_dic)
 
         print 'Test set: %d instances.' % len(test_x[0])
 
@@ -415,7 +423,9 @@ else:
     with main_graph.as_default():
         with tf.variable_scope("tagger") as scope:
             if args.action == 'test' or (args.action == 'tag' and not args.tag_large):
-                model = Model(nums_chars=nums_chars, nums_tags=nums_tags, buckets_char=[max_step], counts=[200], font=font, pic_size=pic_size, tag_scheme=tag_scheme, word_vec=word_vector, graphic=graphic, radical=radical, crf=crf, ngram=num_ngram, batch_size=args.tag_batch)
+                model = Model(nums_chars=nums_chars, nums_tags=nums_tags, buckets_char=[max_step], counts=[200],
+                              font=font, pic_size=pic_size, tag_scheme=tag_scheme, word_vec=word_vector,
+                              graphic=graphic, radical=radical, crf=crf, ngram=num_ngram, batch_size=args.tag_batch)
             else:
                 bt_chars = []
                 bt_len = args.bucket_size
@@ -426,9 +436,14 @@ else:
                 if max_step > 300:
                     bt_chars.append(max_step)
                 bt_counts = [200] * len(bt_chars)
-                model = Model(nums_chars=nums_chars, nums_tags=nums_tags, buckets_char=bt_chars, counts=bt_counts, font=font, pic_size=pic_size, tag_scheme=tag_scheme, word_vec=word_vector, graphic=graphic, radical=radical, crf=crf, ngram=num_ngram, batch_size=args.tag_batch)
-            model.main_graph(trained_model=None, scope=scope, emb_dim=emb_dim, gru=gru, rnn_dim=rnn_dim, rnn_num=rnn_num, drop_out=drop_out, pixels=pixels, con_width=con_width, filters=cv_kernels, pooling_size=pooling_size)
-        model.define_updates(new_chars=new_chars, emb_path=emb_path, char2idx=char2idx, new_grams=new_grams, ng_emb_path=ng_emb_path, gram2idx=gram2idx)
+                model = Model(nums_chars=nums_chars, nums_tags=nums_tags, buckets_char=bt_chars, counts=bt_counts,
+                              font=font, pic_size=pic_size, tag_scheme=tag_scheme, word_vec=word_vector,
+                              graphic=graphic, radical=radical, crf=crf, ngram=num_ngram, batch_size=args.tag_batch)
+            model.main_graph(trained_model=None, scope=scope, emb_dim=emb_dim, gru=gru, rnn_dim=rnn_dim,
+                             rnn_num=rnn_num, drop_out=drop_out, pixels=pixels, con_width=con_width,
+                             filters=cv_kernels, pooling_size=pooling_size)
+        model.define_updates(new_chars=new_chars, emb_path=emb_path, char2idx=char2idx, new_grams=new_grams,
+                             ng_emb_path=ng_emb_path, gram2idx=gram2idx)
         init = tf.global_variables_initializer()
 
         print 'Done. Time consumed: %d seconds' % int(time() - t)

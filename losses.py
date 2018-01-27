@@ -104,21 +104,20 @@ def crf_loss(y, y_, ly, ly_, transitions, nums_tags, batch_size):
     tag_ids = tf.contrib.layers.one_hot_encoding(tag_ids, nums_tags)
     point_score = tf.reduce_sum(tag_scores * tag_ids, axis=2)
     point_score *= masks
-    #Save for future
-    #trans_score = tf.gather_nd(transitions, idx_tag_ids)
+    # Save for future
+    # trans_score = tf.gather_nd(transitions, idx_tag_ids)
     trans_sh = tf.stack(transitions.get_shape())
     trans_sh = tf.cumprod(trans_sh, exclusive=True, reverse=True)
     flat_tag_ids = tf.reduce_sum(trans_sh * idx_tag_ids, axis=2)
     trans_score = tf.gather(tf.reshape(transitions, [-1]), flat_tag_ids)
-    ##
-    #extend_mask = tf.concat(1, [tf.ones([batch_size, 1]), masks])
+    # extend_mask = tf.concat(1, [tf.ones([batch_size, 1]), masks])
     extend_mask = masks
     trans_score *= extend_mask
     target_path_score = tf.reduce_sum(point_score) + tf.reduce_sum(trans_score)
     total_path_score, _, _ = Forward(tag_scores, transitions, nums_tags, lengths, batch_size)()
     tagging_loss = - (target_path_score - total_path_score)
     lm_loss = tf.reduce_sum(sparse_cross_entropy(ly, ly_) * masks)
-    # return lm_loss
+
     return tagging_loss + lm_loss
 
 
@@ -127,21 +126,20 @@ def loss_wrapper(y, y_, lm_y, lm_y_, loss_function, transitions=None, nums_tags=
     total_loss = []
     if loss_function is crf_loss:
         assert len(y) == len(transitions) and len(transitions) == len(nums_tags) and batch_size is not None
-        for sy, sy_, ly, ly_, stranstion, snums_tags in zip(y, y_, lm_y, lm_y_, transitions, nums_tags):
-            total_loss.append(loss_function(sy, sy_, ly, ly_, stranstion, snums_tags, batch_size))
+        for sy, sy_, ly, ly_, transition, tags in zip(y, y_, lm_y, lm_y_, transitions, nums_tags):
+            total_loss.append(loss_function(sy, sy_, ly, ly_, transition, tags, batch_size))
     elif loss_function is cross_entropy:
         assert len(y) == len(nums_tags)
-        for sy, sy_, snums_tags in zip(y, y_, nums_tags):
-            total_loss.append(loss_function(sy, sy_, snums_tags))
+        for sy, sy_, tags in zip(y, y_, nums_tags):
+            total_loss.append(loss_function(sy, sy_, tags))
     elif loss_function is sparse_cross_entropy:
         for sy, sy_ in zip(y, y_):
             total_loss.append(loss_function(sy, sy_))
     elif loss_function is sparse_cross_entropy_with_weights:
         assert len(y) == len(nums_tags)
-        for sy, sy_, snums_tags in zip(y, y_):
+        for sy, sy_, tags in zip(y, y_):
             total_loss.append(tf.reshape(loss_function(sy, sy_, weights=weights, average_cross_steps=average_cross_steps), [-1]))
     else:
         for sy, sy_ in zip(y, y_):
             total_loss.append(tf.reshape(loss_function(sy, sy_), [-1]))
     return tf.stack(total_loss)
-

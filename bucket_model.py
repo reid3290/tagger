@@ -48,6 +48,8 @@ class Model(object):
         self.scores = None
         self.params = None
         self.pixels = None
+        self.drop_out = None
+        self.drop_out_v = None
         # 默认是 F1-score
         self.metric = metric
         self.updates = []
@@ -64,8 +66,10 @@ class Model(object):
         self.output_w = []
         self.output_w_ = []
 
-        self.lm_output = []
-        self.lm_output_ = []
+        self.lm_predictions = []
+        self.lm_groundtruthes = []
+
+        self.merged_summary = None
 
         self.merged_summary = None
         self.summaries = []
@@ -92,7 +96,7 @@ class Model(object):
         self.losses = []
 
     def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, rad_dim=30, emb=None,
-                   ng_embs=None, pixels=None, con_width=None, filters=None, pooling_size=None):
+                   ngram_embedding=None, pixels=None, con_width=None, filters=None, pooling_size=None):
         # trained_model: 模型存储路径
         if trained_model is not None:
             param_dic = {'nums_chars': self.nums_chars, 'nums_tags': self.nums_tags, 'tag_scheme': self.tag_scheme,
@@ -138,12 +142,12 @@ class Model(object):
             self.radical_layer = EmbeddingLayer(216, rad_dim, name='radical_layer')
 
         if self.ngram is not None:
-            if ng_embs is not None:
-                assert len(ng_embs) == len(self.ngram)
+            if ngram_embedding is not None:
+                assert len(ngram_embedding) == len(self.ngram)
             else:
-                ng_embs = [None for _ in range(len(self.ngram))]
+                ngram_embedding = [None for _ in range(len(self.ngram))]
             for i, n_gram in enumerate(self.ngram):
-                self.gram_layers.append(EmbeddingLayer(n_gram + 1000 * (i + 2), emb_dim, weights=ng_embs[i],
+                self.gram_layers.append(EmbeddingLayer(n_gram + 1000 * (i + 2), emb_dim, weights=ngram_embedding[i],
                                                        name=str(i + 2) + 'gram_layer'))
 
         wrapper_conv_1, wrapper_mp_1, wrapper_conv_2, wrapper_mp_2, wrapper_dense, wrapper_dr = \
@@ -321,79 +325,22 @@ class Model(object):
                 if rnn_num > 1:
                     lm_fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([lm_fw_rnn_cell] * rnn_num, state_is_tuple=True)
                     lm_bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([lm_bw_rnn_cell] * rnn_num, state_is_tuple=True)
-            lm_rnn_out = BiLSTM(lm_rnn_dim, fw_cell=lm_fw_rnn_cell, bw_cell=lm_bw_rnn_cell, p=dr,
-                                name='LM-BiLSTM' + str(bucket), scope='LM-BiRNN')(emb_set[0], input_sentences)
+            lm_rnn_output = BiLSTM(lm_rnn_dim, fw_cell=lm_fw_rnn_cell, bw_cell=lm_bw_rnn_cell, p=dr,
+                                   name='LM-BiLSTM' + str(bucket), scope='LM-BiRNN')(emb_set[0], input_sentences)
 
             lm_output_wrapper = TimeDistributed(
                 HiddenLayer(lm_rnn_dim * 2, self.nums_chars + 2, activation='linear', name='lm_hidden'),
                 name='lm_wrapper')
-            lm_out = lm_output_wrapper(lm_rnn_out)
-            self.lm_output.append([lm_out])
-            self.lm_output_.append([tf.placeholder(tf.int32, [None, bucket], name='lm_targets' + str(bucket))])
-            # lm_config = {
-            #     "init_scale": 0.1,
-            #     "learning_rate": 1.0,
-            #     "max_grad_norm": 5,
-            #     "num_layers": 2,
-            #     "num_steps": 20,
-            #     "hidden_size": 200,
-            #     "max_epoch": 4,
-            #     "max_max_epoch": 13,
-            #     "keep_prob": 1.0,
-            #     "lr_decay": 0.5,
-            #     "batch_size": 20,
-            #     "vocab_size": 10000,
-            #     "rnn_mode": "CUDNN",
-            # }
-            # cell = tf.contrib.rnn.BasicLSTMCell(
-            #     lm_config["hidden_size"], forget_bias=0.0, state_is_tuple=True,
-            #     reuse=False)
-            # cell = tf.contrib.rnn.DropoutWrapper(
-            #     cell, output_keep_prob=lm_config["keep_prob"])
-            #
-            # cell = tf.contrib.rnn.MultiRNNCell(
-            #     [cell for _ in range(lm_config["num_layers"])], state_is_tuple=True)
-            #
-            # self._initial_lm_state = cell.zero_state(lm_config["batch_size"], tf.float32)
-            #
-            # lm_inputs = tf.unstack(emb_set[0], num=num_steps, axis=1)
-            # lm_outputs, lm_state = tf.contrib.rnn.static_rnn(cell, lm_inputs,
-            #                                                  initial_state=self._initial_lm_state)
-            #
-            # lm_output = tf.reshape(tf.concat(lm_outputs, 1), [-1, lm_config["hidden_size"]])
-            # lm_softmax_w = tf.get_variable(
-            #     "softmax_w", [size, vocab_size], tf.float32)
-            # lm_softmax_b = tf.get_variable("softmax_b", [vocab_size], dtype=tf.float32)
-            # lm_logits = tf.nn.xw_plus_b(output, lm_softmax_w, lm_softmax_b)
-            # # Reshape logits to be a 3-D tensor for sequence loss
-            # lm_logits = tf.reshape(lm_logits, [self.batch_size, self.num_steps, vocab_size])
-            #
-            # # Use the contrib sequence loss and average over the batches
-            # lm_loss = tf.contrib.seq2seq.sequence_loss(
-            #     lm_logits,
-            #     input_.targets,
-            #     tf.ones([self.batch_size, self.num_steps], tf.float32),
-            #     average_across_timesteps=False,
-            #     average_across_batch=True)
-            #
-            # # Update the cost
-            # self._lm_cost = tf.reduce_sum(lm_loss)
-            # self._final_lm_state = lm_state
-            #
-            # tvars = tf.trainable_variables()
-            # lm_grads, _ = tf.clip_by_global_norm(tf.gradients(self._lm_cost, tvars),
-            #                                      lm_config["max_grad_norm"])
-            # optimizer = tf.train.GradientDescentOptimizer(self._lr)
-            # self._lm_train_op = optimizer.apply_gradients(
-            #     zip(lm_grads, tvars),
-            #     global_step=tf.contrib.framework.get_or_create_global_step())
+            lm_final_output = lm_output_wrapper(lm_rnn_output)
+            self.lm_predictions.append([lm_final_output])
+            self.lm_groundtruthes.append([tf.placeholder(tf.int32, [None, bucket], name='lm_targets' + str(bucket))])
 
             print 'Bucket %d, %f seconds' % (idx + 1, time() - t1)
 
         assert \
             len(self.input_v) == len(self.output) and \
             len(self.output) == len(self.output_) and \
-            len(self.lm_output) == len(self.lm_output_) and \
+            len(self.lm_predictions) == len(self.lm_groundtruthes) and \
             len(self.output) == len(self.counts)
 
         self.params = tf.trainable_variables()
@@ -420,10 +367,11 @@ class Model(object):
 
             for i in range(len(self.input_v)):
                 # 根据第 i 个 bucket 的输出和 ground truth，用 CRF 损失函数，计算损失函数值
-                bucket_loss = losses.loss_wrapper(self.output[i], self.output_[i], self.lm_output[i],
-                                                  self.lm_output_[i], loss_function,
+                bucket_loss = losses.loss_wrapper(self.output[i], self.output_[i], self.lm_predictions[i],
+                                                  self.lm_groundtruthes[i], loss_function,
                                                   transitions=self.transition_char, nums_tags=self.nums_tags,
                                                   batch_size=self.real_batches[i])
+                tf.summary.scalar('loss-%s' % i, bucket_loss)
                 self.losses.append(bucket_loss)
                 self.summaries.append(tf.summary.scalar('bucket loss %d' % i, tf.reduce_mean(bucket_loss)))
 
@@ -529,6 +477,7 @@ class Model(object):
         :param decay_step:
         :param tag_num: 标签种类个数
         """
+
         train_writer = tf.summary.FileWriter('./train_log', sess[0].graph)
 
         lr_r = lr
@@ -584,7 +533,7 @@ class Model(object):
                 idx = self.bucket_dit[c_len]
                 real_batch_size = self.real_batches[idx]
                 # 当前 bucket 的模型的输入和输出（注意每个 bucket 都有一个单独的模型）
-                model_placeholders = self.input_v[idx] + self.output_[idx] + self.lm_output_[idx]
+                model_placeholders = self.input_v[idx] + self.output_[idx] + self.lm_groundtruthes[idx]
                 pt_holder = None
                 if self.graphic:
                     pt_holder = self.input_p[idx]
@@ -599,6 +548,7 @@ class Model(object):
                             pt_h=pt_holder, pixels=self.pixels, verbose=True,
                             merged_summary=self.merged_summary, log_writer=train_writer,
                             single_summary=self.summaries[idx], epoch_index=epoch)
+
 
             predictions = []
             # 遍历每个 bucket, 用开发集测试准确率
