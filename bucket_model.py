@@ -14,7 +14,7 @@ import shutil
 
 
 class Model(object):
-    def __init__(self, window_size, filters_number, nums_chars, nums_tags, buckets_char, counts=None, pic_size=None,
+    def __init__(self, nums_chars, nums_tags, buckets_char, window_size=0, filters_number=0, counts=None, pic_size=None,
                  font=None, batch_size=10, tag_scheme='BIES', word_vec=True, radical=False, graphic=False, crf=1,
                  ngram=None, metric='F1-score'):
         self.window_size = window_size
