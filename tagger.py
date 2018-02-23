@@ -74,6 +74,8 @@ parser.add_argument('-ens', '--ensemble', default=False, help='Ensemble several 
 
 parser.add_argument('-tl', '--tag_large', default=False, help='Tag (very) large file', action='store_true')
 
+parser.add_argument('-debug', '--debug', default=False, help='Print debug information', action='store_true')
+
 parser.add_argument('-ls', '--large_size', default=200000, type=int, help='Tag (very) large file')
 
 args = parser.parse_args()

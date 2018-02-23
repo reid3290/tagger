@@ -96,6 +96,24 @@ class Model(object):
         self.real_batches = toolbox.get_real_batch(self.counts, self.batch_size)
         self.losses = []
 
+    def highway(self, X):
+        # batch_size = tf.shape(X)[0]
+        # sentence_length = X.shape[1]
+        embedding_size = X.shape[2]
+        N = tf.unstack(X, axis=1)
+        output = []
+        W_t = tf.get_variable("W_T", shape=[embedding_size, embedding_size])
+        b_t = tf.get_variable("b_T", shape=[embedding_size])
+        W_h = tf.get_variable("W_H", shape=[embedding_size, embedding_size])
+        b_h = tf.get_variable("b_H", shape=[embedding_size])
+        for n in N:
+            transform_gate = tf.sigmoid(tf.nn.xw_plus_b(n, W_t, b_t))
+            carry_gate = 1 - transform_gate
+            nonlinear_transform = tf.nn.relu(tf.matmul(W_h, n) + b_h)
+            output.append(tf.multiply(transform_gate, nonlinear_transform) + tf.multiply(carry_gate, n))
+        output = tf.stack(output, axis=1)
+        return output
+
     def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, rad_dim=30, emb=None,
                    ngram_embedding=None, pixels=None, con_width=None, filters=None, pooling_size=None):
         # trained_model: 模型存储路径
@@ -326,8 +344,10 @@ class Model(object):
                 if rnn_num > 1:
                     lm_fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([lm_fw_rnn_cell] * rnn_num, state_is_tuple=True)
                     lm_bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([lm_bw_rnn_cell] * rnn_num, state_is_tuple=True)
-            lm_rnn_output = BiLSTM(lm_rnn_dim, fw_cell=lm_fw_rnn_cell, bw_cell=lm_bw_rnn_cell, p=dr,
-                                   name='LM-BiLSTM' + str(bucket), scope='LM-BiRNN')(emb_set[0], input_sentences)
+            lm_rnn_output = BiLSTM(lm_rnn_dim, fw_cell=lm_fw_rnn_cell,
+                                   bw_cell=lm_bw_rnn_cell, p=dr,
+                                   name='LM-BiLSTM' + str(bucket),
+                                   scope='LM-BiRNN')(self.highway(emb_set[0]), input_sentences)
 
             lm_output_wrapper = TimeDistributed(
                 HiddenLayer(lm_rnn_dim * 2, self.nums_chars + 2, activation='linear', name='lm_hidden'),
@@ -544,11 +564,11 @@ class Model(object):
                 # 训练当前的 bucket，这个函数里面才真正地为模型填充了数据并运行(以 real_batch_size 为单位，将 bucket 中的句子依次喂给模型)
                 # 被 sess.run 的是 config=self.train_step[idx]，train_step[idx] 就会触发 BP 更新参数了
                 Batch.train(sess=sess[0], placeholders=model_placeholders, batch_size=real_batch_size,
-                            train_step=self.train_steps[idx],
-                            loss=self.losses[idx],
+                            train_step=self.train_steps[idx],loss=self.losses[idx],
                             lr=self.l_rate, lrv=lr_r, dr=self.drop_out, drv=self.drop_out_v, data=list(sample),
-                            # debug_variable=[self.lm_output[idx], self.lm_output_[idx], self.output[idx], self.output_[idx]],
-                            pt_h=pt_holder, pixels=self.pixels, verbose=True,
+                            # debug_variable=[self.lm_output[idx], self.lm_output_[idx], self.output[idx],
+                            # self.output_[idx]], verbose=True,
+                            pt_h=pt_holder, pixels=self.pixels,
                             merged_summary=self.merged_summary, log_writer=train_writer,
                             single_summary=self.summaries[idx], epoch_index=epoch)
 
