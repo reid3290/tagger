@@ -96,20 +96,20 @@ class Model(object):
         self.real_batches = toolbox.get_real_batch(self.counts, self.batch_size)
         self.losses = []
 
-    def highway(self, X):
+    def highway(self, X, name=""):
         # batch_size = tf.shape(X)[0]
         # sentence_length = X.shape[1]
         embedding_size = X.shape[2]
         N = tf.unstack(X, axis=1)
         output = []
-        W_t = tf.get_variable("W_T", shape=[embedding_size, embedding_size])
-        b_t = tf.get_variable("b_T", shape=[embedding_size])
-        W_h = tf.get_variable("W_H", shape=[embedding_size, embedding_size])
-        b_h = tf.get_variable("b_H", shape=[embedding_size])
+        W_t = tf.get_variable("W_T"+name, shape=[embedding_size, embedding_size])
+        b_t = tf.get_variable("b_T"+name, shape=[embedding_size])
+        W_h = tf.get_variable("W_H"+name, shape=[embedding_size, embedding_size])
+        b_h = tf.get_variable("b_H"+name, shape=[embedding_size])
         for n in N:
             transform_gate = tf.sigmoid(tf.nn.xw_plus_b(n, W_t, b_t))
             carry_gate = 1 - transform_gate
-            nonlinear_transform = tf.nn.relu(tf.matmul(W_h, n) + b_h)
+            nonlinear_transform = tf.nn.relu(tf.nn.xw_plus_b(n, W_h, b_h))
             output.append(tf.multiply(transform_gate, nonlinear_transform) + tf.multiply(carry_gate, n))
         output = tf.stack(output, axis=1)
         return output
