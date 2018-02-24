@@ -1,0 +1,138 @@
+2018-02-07 14:51:58.090690: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2018-02-07 14:51:58.700599: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Found device 0 with properties: 
+name: Tesla K80 major: 3 minor: 7 memoryClockRate(GHz): 0.8235
+pciBusID: 0000:10:00.0
+totalMemory: 11.17GiB freeMemory: 11.11GiB
+2018-02-07 14:51:58.700667: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:10:00.0, compute capability: 3.7)
+2018-02-07 14:52:22.674068: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:10:00.0, compute capability: 3.7)
+Encoding:  utf-8
+Reading data......
+Reading embeddings...
+Longest sentence by character is 431. 
+Longest sentence by word is 254. 
+Longest word is 67. 
+Number of buckets:  5
+Training set: 27663 instances; Dev set: 8713 instances.
+Initialization....
+Bucket 1, 0.880846 seconds
+Bucket 2, 0.897543 seconds
+Bucket 3, 1.103917 seconds
+Bucket 4, 1.290157 seconds
+Bucket 5, 1.422713 seconds
+Bucket 6, 1.234114 seconds
+Training preparation...
+Defining loss...
+Computing gradients...
+Bucket 1, 6.969456 seconds
+Bucket 2, 12.155344 seconds
+Bucket 3, 17.147555 seconds
+Bucket 4, 21.876266 seconds
+Bucket 5, 25.052158 seconds
+Bucket 6, 25.938157 seconds
+Done. Time consumed: 172 seconds
+epoch: 1
+Segmentation F1-score: 0.909773
+POS Tagging F1-score: 0.825760
+
+Time consumed: 1019 seconds
+epoch: 2
+Segmentation F1-score: 0.930699
+POS Tagging F1-score: 0.864226
+
+Time consumed: 936 seconds
+epoch: 3
+Segmentation F1-score: 0.933038
+POS Tagging F1-score: 0.864394
+
+Time consumed: 954 seconds
+epoch: 4
+Segmentation F1-score: 0.938375
+POS Tagging F1-score: 0.876506
+
+Time consumed: 966 seconds
+epoch: 5
+Segmentation F1-score: 0.941025
+POS Tagging F1-score: 0.883140
+
+Time consumed: 967 seconds
+epoch: 6
+Segmentation F1-score: 0.942206
+POS Tagging F1-score: 0.883857
+
+Time consumed: 965 seconds
+epoch: 7
+Segmentation F1-score: 0.941623
+POS Tagging F1-score: 0.884403
+
+Time consumed: 962 seconds
+epoch: 8
+Segmentation F1-score: 0.942089
+POS Tagging F1-score: 0.884855
+
+Time consumed: 960 seconds
+epoch: 9
+Segmentation F1-score: 0.941862
+POS Tagging F1-score: 0.883170
+
+Time consumed: 940 seconds
+epoch: 10
+Segmentation F1-score: 0.940791
+POS Tagging F1-score: 0.882017
+
+Time consumed: 967 seconds
+epoch: 11
+Segmentation F1-score: 0.940036
+POS Tagging F1-score: 0.881436
+
+Time consumed: 931 seconds
+epoch: 12
+Segmentation F1-score: 0.939640
+POS Tagging F1-score: 0.880769
+
+Time consumed: 928 seconds
+epoch: 13
+Segmentation F1-score: 0.938952
+POS Tagging F1-score: 0.879754
+
+Time consumed: 883 seconds
+epoch: 14
+Segmentation F1-score: 0.938759
+POS Tagging F1-score: 0.878142
+
+Time consumed: 848 seconds
+epoch: 15
+Segmentation F1-score: 0.937788
+POS Tagging F1-score: 0.876799
+
+Time consumed: 922 seconds
+epoch: 16
+Segmentation F1-score: 0.937223
+POS Tagging F1-score: 0.876740
+
+Time consumed: 917 seconds
+epoch: 17
+Segmentation F1-score: 0.936598
+POS Tagging F1-score: 0.875915
+
+Time consumed: 905 seconds
+epoch: 18
+Segmentation F1-score: 0.936265
+POS Tagging F1-score: 0.875092
+
+Time consumed: 926 seconds
+epoch: 19
+Segmentation F1-score: 0.935527
+POS Tagging F1-score: 0.874271
+
+Time consumed: 930 seconds
+epoch: 20
+Segmentation F1-score: 0.935169
+POS Tagging F1-score: 0.873336
+
+Time consumed: 932 seconds
+Training is finished!
+Best segmentation F1-score: 0.942089
+Best POS Tagging F1-score: 0.884855
+Best epoch: 8
+
+Done. Time consumed: 5.225000 hours

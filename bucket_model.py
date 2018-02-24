@@ -566,9 +566,8 @@ class Model(object):
                 Batch.train(sess=sess[0], placeholders=model_placeholders, batch_size=real_batch_size,
                             train_step=self.train_steps[idx],loss=self.losses[idx],
                             lr=self.l_rate, lrv=lr_r, dr=self.drop_out, drv=self.drop_out_v, data=list(sample),
-                            # debug_variable=[self.lm_output[idx], self.lm_output_[idx], self.output[idx],
-                            # self.output_[idx]], verbose=True,
-                            pt_h=pt_holder, pixels=self.pixels,
+                            # debug_variable=[self.lm_output[idx], self.lm_output_[idx], self.output[idx], self.output_[idx]],
+                            pt_h=pt_holder, pixels=self.pixels, verbose=False,
                             merged_summary=self.merged_summary, log_writer=train_writer,
                             single_summary=self.summaries[idx], epoch_index=epoch)
 

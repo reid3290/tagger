@@ -90,7 +90,8 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
             if single_summary is not None and log_writer is not None:
                 loss_value, summary, _ = sess.run([loss, single_summary, train_step], feed_dict=feed_dict)
                 log_step = start_idx + len(samples)*epoch_index
-                print "log step: %d" % log_step
+                if verbose:
+                    print "log step: %d" % log_step
                 log_writer.add_summary(summary[0], log_step)
                 log_writer.add_summary(summary[1], log_step)
             else:
