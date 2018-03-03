@@ -118,6 +118,7 @@ def crf_loss(y, y_, ly, ly_, transitions, nums_tags, batch_size):
     tagging_loss = - (target_path_score - total_path_score)
     lm_loss = tf.reduce_sum(sparse_cross_entropy(ly, ly_) * masks)
 
+    #return tagging_loss, tf.zeros_like(lm_loss)
     return tagging_loss, lm_loss
 
 

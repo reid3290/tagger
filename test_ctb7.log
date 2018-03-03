@@ -1,0 +1,45 @@
+2017-12-10 09:47:31.430651: I tensorflow/core/platform/cpu_feature_guard.cc:137] Your CPU supports instructions that this TensorFlow binary was not compiled to use: SSE4.1 SSE4.2 AVX AVX2 FMA
+2017-12-10 09:47:32.414912: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Found device 0 with properties: 
+name: Tesla K80 major: 3 minor: 7 memoryClockRate(GHz): 0.8235
+pciBusID: 0000:06:00.0
+totalMemory: 11.17GiB freeMemory: 11.11GiB
+2017-12-10 09:47:33.177528: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1030] Found device 1 with properties: 
+name: Tesla K80 major: 3 minor: 7 memoryClockRate(GHz): 0.8235
+pciBusID: 0000:8f:00.0
+totalMemory: 11.17GiB freeMemory: 11.11GiB
+2017-12-10 09:47:33.179870: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1045] Device peer to peer matrix
+2017-12-10 09:47:33.180430: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1051] DMA: 0 1 
+2017-12-10 09:47:33.180457: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1061] 0:   Y N 
+2017-12-10 09:47:33.180468: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1061] 1:   N Y 
+2017-12-10 09:47:33.180501: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:06:00.0, compute capability: 3.7)
+2017-12-10 09:47:33.180517: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:1) -> (device: 1, name: Tesla K80, pci bus id: 0000:8f:00.0, compute capability: 3.7)
+2017-12-10 09:47:39.403864: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:0) -> (device: 0, name: Tesla K80, pci bus id: 0000:06:00.0, compute capability: 3.7)
+2017-12-10 09:47:39.403921: I tensorflow/core/common_runtime/gpu/gpu_device.cc:1120] Creating TensorFlow device (/device:GPU:1) -> (device: 1, name: Tesla K80, pci bus id: 0000:8f:00.0, compute capability: 3.7)
+Encoding:  utf-8
+Test set: 9067 instances.
+Longest sentence by character is 386. 
+Longest sentence by word is 226. 
+Longest word is 75. 
+Initialization....
+Bucket 1, 0.526825 seconds
+Done. Time consumed: 1 seconds
+Loading weights....
+Loaded.
+Best scores: 
+Segmentation F1-score: 0.955621
+Segmentation Precision: 0.953099
+Segmentation Recall: 0.958157
+Segmentation True Negative Rate: 0.999125
+Segmentation Boundary-F1-score: 0.954122
+
+Joint POS tagging F-score: 0.903123
+Joint POS tagging Precision: 0.900740
+Joint POS tagging Recall: 0.905519
+Joint POS True Negative Rate: 0.999952
+Joint POS tagging Boundary-F1-score: 0.873773
+
+Done.
+Traceback (most recent call last):
+  File "tagger.py", line 522, in <module>
+    print 'Done. Time consumed: %d seconds' % int(time() - s_time)
+TypeError: unsupported operand type(s) for -: 'float' and 'NoneType'

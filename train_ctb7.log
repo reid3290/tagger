@@ -1,0 +1,20 @@
+Traceback (most recent call last):
+  File "tagger.py", line 3, in <module>
+    import toolbox
+  File "/workspace/data/tagger/toolbox.py", line 6, in <module>
+    import tensorflow as tf
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/__init__.py", line 24, in <module>
+    from tensorflow.python import *
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/python/__init__.py", line 52, in <module>
+    from tensorflow.core.framework.graph_pb2 import *
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/core/framework/graph_pb2.py", line 16, in <module>
+    from tensorflow.core.framework import node_def_pb2 as tensorflow_dot_core_dot_framework_dot_node__def__pb2
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/core/framework/node_def_pb2.py", line 16, in <module>
+    from tensorflow.core.framework import attr_value_pb2 as tensorflow_dot_core_dot_framework_dot_attr__value__pb2
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/core/framework/attr_value_pb2.py", line 16, in <module>
+    from tensorflow.core.framework import tensor_pb2 as tensorflow_dot_core_dot_framework_dot_tensor__pb2
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/core/framework/tensor_pb2.py", line 16, in <module>
+    from tensorflow.core.framework import resource_handle_pb2 as tensorflow_dot_core_dot_framework_dot_resource__handle__pb2
+  File "/usr/local/lib/python2.7/dist-packages/tensorflow/core/framework/resource_handle_pb2.py", line 22, in <module>
+    serialized_pb=_b('\n/tensorflow/core/framework/resource_handle.proto\x12\ntensorflow\"r\n\x13ResourceHandleProto\x12\x0e\n\x06\x64\x65vice\x18\x01 \x01(\t\x12\x11\n\tcontainer\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\t\x12\x11\n\thash_code\x18\x04 \x01(\x04\x12\x17\n\x0fmaybe_type_name\x18\x05 \x01(\tB/\n\x18org.tensorflow.frameworkB\x0eResourceHandleP\x01\xf8\x01\x01\x62\x06proto3')
+TypeError: __init__() got an unexpected keyword argument 'syntax'
