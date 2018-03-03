@@ -320,7 +320,7 @@ class Model(object):
 
             # rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
             rnn_out = BiLSTM(rnn_dim, fw_cell=fw_rnn_cell, bw_cell=bw_rnn_cell, p=dr,
-                             name='BiLSTM' + str(bucket), scope='BiRNN')(emb_out, input_sentences)
+                             name='BiLSTM' + str(bucket), scope='BiRNN')(self.highway(emb_out, "_tag"), input_sentences)
 
             # 应用全连接层，Wx+b 得到最后的输出
             output = output_wrapper(rnn_out)
