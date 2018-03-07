@@ -1,12 +1,4 @@
 .idea/
-2gram.txt
-3gram.txt
-chars.txt
-checkpoint
-glove_sub.txt
-*_model
-*_weights.data-00000-of-00001
-*_weights.index
 output.txt
 tags.txt
 *.pyc
