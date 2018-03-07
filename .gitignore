@@ -1,5 +1,4 @@
 .idea/
 output.txt
-tags.txt
 *.pyc
 test-corpus/
