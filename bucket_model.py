@@ -11,7 +11,7 @@ import random
 import cPickle as pickle
 import math
 import shutil
-
+from tensorflow_with_latest_papers import highway_network_modern
 
 class Model(object):
     def __init__(self, nums_chars, nums_tags, buckets_char, window_size=0, filters_number=0, counts=None, pic_size=None,
@@ -97,25 +97,28 @@ class Model(object):
         self.losses = []
 
     def highway(self, X, name=""):
-        # batch_size = tf.shape(X)[0]
-        # sentence_length = X.shape[1]
-        embedding_size = X.shape[2]
-        N = tf.unstack(X, axis=1)
-        output = []
-        W_t = tf.get_variable("W_T"+name, shape=[embedding_size, embedding_size])
-        b_t = tf.get_variable("b_T"+name, shape=[embedding_size])
-        W_h = tf.get_variable("W_H"+name, shape=[embedding_size, embedding_size])
-        b_h = tf.get_variable("b_H"+name, shape=[embedding_size])
-        for n in N:
-            transform_gate = tf.sigmoid(tf.nn.xw_plus_b(n, W_t, b_t))
-            carry_gate = 1 - transform_gate
-            nonlinear_transform = tf.nn.relu(tf.nn.xw_plus_b(n, W_h, b_h))
-            output.append(tf.multiply(transform_gate, nonlinear_transform) + tf.multiply(carry_gate, n))
-        output = tf.stack(output, axis=1)
-        return output
+        return highway_network_modern.highway(X, scope=name, use_batch_timesteps=True)
 
     def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, rad_dim=30, emb=None,
                    ngram_embedding=None, pixels=None, con_width=None, filters=None, pooling_size=None):
+        """
+
+        :param trained_model:
+        :param scope:
+        :param emb_dim:
+        :param gru:
+        :param rnn_dim:
+        :param rnn_num:
+        :param drop_out:
+        :param rad_dim: n
+        :param emb:
+        :param ngram_embedding: 预训练 ngram embeddig 文件
+        :param pixels:
+        :param con_width:
+        :param filters:
+        :param pooling_size:
+        :return:
+        """
         # trained_model: 模型存储路径
         if trained_model is not None:
             param_dic = {'nums_chars': self.nums_chars, 'nums_tags': self.nums_tags, 'tag_scheme': self.tag_scheme,
@@ -124,8 +127,10 @@ class Model(object):
                          'rnn_num': rnn_num, 'drop_out': drop_out, 'filter_size': con_width, 'filters': filters,
                          'pooling_size': pooling_size, 'font': self.font, 'buckets_char': self.buckets_char,
                          'ngram': self.ngram}
-            # print param_dic
-
+            print "RNN dimension is %d" % rnn_dim
+            print "RNN number is %d" % rnn_num
+            print "Character embedding size is %d" % emb_dim
+            print "Ngram embedding dimension is %d" % emb_dim
             # 存储模型超参数
             if self.metric == 'All':
                 # rindex() 返回子字符串 str 在字符串中最后出现的位置
@@ -219,6 +224,7 @@ class Model(object):
         for idx, bucket in enumerate(self.buckets_char):
             if idx == 1:
                 # scope 是 tf.variable_scope("tagger", reuse=None, initializer=initializer)
+                # 只需要设置一次 reuse，后面就都 reuse 了
                 scope.reuse_variables()
             t1 = time()
 
@@ -320,7 +326,7 @@ class Model(object):
 
             # rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
             rnn_out = BiLSTM(rnn_dim, fw_cell=fw_rnn_cell, bw_cell=bw_rnn_cell, p=dr,
-                             name='BiLSTM' + str(bucket), scope='BiRNN')(self.highway(emb_out, "_tag"), input_sentences)
+                             name='BiLSTM' + str(bucket), scope='BiRNN')(self.highway(emb_out, "tag"), input_sentences)
 
             # 应用全连接层，Wx+b 得到最后的输出
             output = output_wrapper(rnn_out)
@@ -744,7 +750,7 @@ class Model(object):
         c_len = len(r_x[0][0])
         idx = self.bucket_dit[c_len]
 
-        real_batch = batch_size * 300 / c_len
+        real_batch = int(batch_size * 300 / c_len)
 
         prediction = self.predict(data=r_x, sess=sess, model=self.input_v[idx] + self.output[idx], index=idx,
                                   pt_h=pt_holder, pt=self.pixels, ensemble=ensemble, batch_size=real_batch)

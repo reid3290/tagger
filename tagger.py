@@ -23,7 +23,7 @@ parser.add_argument('-m', '--model', default='trained_model', help='Name of the 
 parser.add_argument('-tg', '--tag_scheme', default='BIES', help='Tagging scheme')
 parser.add_argument('-crf', '--crf', default=1, type=int, help='Using CRF interface')
 
-parser.add_argument('-ws', '--window_size', default=5, type=int, help='The biggest CNN window\'s size')
+parser.add_argument('-ws', '--window_size', default=0, type=int, help='The biggest CNN window\'s size')
 parser.add_argument('-fn', '--filters_number', default=100, type=int, help='CNN filter number')
 
 parser.add_argument('-ng', '--ngram', default=3, type=int, help='Using ngrams')
@@ -322,6 +322,7 @@ else:
         font_name = font[:font.index('.')]
         pixels = toolbox.read_chars_pixels(path, font_name, pic_size)
 
+    s_time = time()
     if args.action == 'test':
         assert args.test is not None
 
@@ -368,7 +369,6 @@ else:
             test_y[k] = toolbox.pad_zeros(test_y[k], max_step)
 
     elif args.action == 'tag':
-        s_time = time()
         assert args.raw is not None
 
         raw_file = args.raw
