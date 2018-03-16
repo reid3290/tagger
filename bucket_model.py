@@ -12,6 +12,7 @@ import cPickle as pickle
 import math
 import shutil
 from tensorflow_with_latest_papers import highway_network_modern
+from my.tensorflow.nn import highway_network
 
 class Model(object):
     def __init__(self, nums_chars, nums_tags, buckets_char, window_size=0, filters_number=0, counts=None, pic_size=None,
@@ -97,7 +98,8 @@ class Model(object):
         self.losses = []
 
     def highway(self, X, name=""):
-        return highway_network_modern.highway(X, scope=name, use_batch_timesteps=True)
+        return highway_network(X, 2, True, is_train=True, scope=name)
+        # return highway_network_modern.highway(X, scope=name, use_batch_timesteps=True)
 
     def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, rad_dim=30, emb=None,
                    ngram_embedding=None, pixels=None, con_width=None, filters=None, pooling_size=None):
