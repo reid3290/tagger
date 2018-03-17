@@ -7,13 +7,12 @@ import tensorflow as tf
 
 
 def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug_variable=None, dr=None, drv=None,
-          pixels=None, pt_h=None, verbose=False, merged_summary=None, log_writer=None, single_summary=None,
+          verbose=False, log_writer=None, single_summary=None,
           epoch_index=0):
     """
     训练单个 bucket 的模型
     :param epoch_index:
     :param single_summary:
-    :param merged_summary:
     :param log_writer:
     :param debug_variable:
     :param loss:
@@ -26,8 +25,6 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
     :param data: 当前 bucket 中的所有句子，shape=(5, bucket 中句子数量，句子长度)
     :param dr: drop_out
     :param drv: =drop_out
-    :param pixels:
-    :param pt_h:
     :param verbose:
     """
     if debug_variable is not None:
@@ -48,8 +45,6 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
     placeholders.append(lr)
     if dr is not None:
         placeholders.append(dr)
-    if pixels is not None:
-        placeholders.append(pt_h)
     while start_idx < len(samples):
         if verbose:
             print '%s : %d of %d' % (datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), start_idx, n_samples)
@@ -63,9 +58,6 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
         holders.append(lrv)
         if dr is not None:
             holders.append(drv)
-        if pixels is not None:
-            pt_ids = [s[0] for s in next_batch_samples]
-            holders.append(toolbox.get_batch_pixels(pt_ids, pixels))
         feed_dict = {m: h for m, h in zip(placeholders, holders)}
         if debug_variable is not None:
             debug_info = sess.run([train_step, loss] + debug_variable, feed_dict=feed_dict)
@@ -100,7 +92,7 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
 
 
 def predict(sess, model, data, dr=None, transitions=None, crf=True, decode_sess=None, scores=None, decode_holders=None,
-            argmax=True, batch_size=100, pixels=None, pt_h=None, ensemble=False, verbose=False):
+            argmax=True, batch_size=100, ensemble=False, verbose=False):
     en_num = None
     if ensemble:
         en_num = len(sess)
@@ -109,8 +101,6 @@ def predict(sess, model, data, dr=None, transitions=None, crf=True, decode_sess=
     input_v = model[:num_items]
     if dr is not None:
         input_v.append(dr)
-    if pixels is not None:
-        input_v.append(pt_h)
     # 预测向量1个
     predictions = model[num_items:]
     # output = [[]]
@@ -138,9 +128,6 @@ def predict(sess, model, data, dr=None, transitions=None, crf=True, decode_sess=
             holders.append([s[item] for s in next_batch_input])
         if dr is not None:
             holders.append(0.0)
-        if pixels is not None:
-            pt_ids = [s[0] for s in next_batch_input]
-            holders.append(toolbox.get_batch_pixels(pt_ids, pixels))
         # length_holder = tf.cast(tf.pack(holders[0]), dtype=tf.int32)
         # length = tf.reduce_sum(tf.sign(length_holder), reduction_indices=1)
         length = np.sum(np.sign(holders[0]), axis=1)

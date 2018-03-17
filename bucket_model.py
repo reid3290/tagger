@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
 import tensorflow as tf
-from layers import EmbeddingLayer, BiLSTM, HiddenLayer, TimeDistributed, DropoutLayer, Convolution, Maxpooling, Forward
+from layers import EmbeddingLayer, BiLSTM, HiddenLayer, TimeDistributed, Forward
 from time import time
 import losses
 import toolbox
@@ -9,17 +9,14 @@ import batch as Batch
 import numpy as np
 import random
 import cPickle as pickle
-import math
 import shutil
 from tensorflow_with_latest_papers import highway_network_modern
 from my.tensorflow.nn import highway_network
 
+
 class Model(object):
-    def __init__(self, nums_chars, nums_tags, buckets_char, window_size=0, filters_number=0, counts=None, pic_size=None,
-                 font=None, batch_size=10, tag_scheme='BIES', word_vec=True, radical=False, graphic=False, crf=1,
-                 ngram=None, metric='F1-score'):
-        self.window_size = window_size
-        self.filters_number = filters_number
+    def __init__(self, nums_chars, nums_tags, buckets_char, counts=None,
+                 batch_size=10, tag_scheme='BIES', crf=1, metric='F1-score'):
         # 字符种类数目
         self.nums_chars = nums_chars
         # 标签种类数目，例如[18]，至于为什么要用数组多此一举不清楚
@@ -29,18 +26,9 @@ class Model(object):
         # 训练集中每个 bucket 中的句子个数
         self.counts = counts
         self.tag_scheme = tag_scheme
-        self.graphic = graphic
-        self.word_vec = word_vec
-        # 是否使用偏旁部首信息
-        self.radical = radical
         # 默认为1，即使用一阶条件随机场
         self.crf = crf
-        self.ngram = ngram
         self.emb_layer = None
-        self.radical_layer = None
-        self.gram_layers = []
-        self.font = font
-        self.pic_size = pic_size
         self.batch_size = batch_size
         self.l_rate = None
         self.decay = None
@@ -49,7 +37,6 @@ class Model(object):
         self.decode_holders = None
         self.scores = None
         self.params = None
-        self.pixels = None
         self.drop_out = None
         self.drop_out_v = None
         # 默认是 F1-score
@@ -71,9 +58,6 @@ class Model(object):
         self.lm_predictions = []
         self.lm_groundtruthes = []
 
-        self.merged_summary = None
-
-        self.merged_summary = None
         self.summaries = []
         # 使用 viterbi 解码
         if self.crf > 0:
@@ -101,8 +85,7 @@ class Model(object):
         return highway_network(X, 2, True, is_train=True, scope=name)
         # return highway_network_modern.highway(X, scope=name, use_batch_timesteps=True)
 
-    def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, rad_dim=30, emb=None,
-                   ngram_embedding=None, pixels=None, con_width=None, filters=None, pooling_size=None):
+    def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, emb=None):
         """
 
         :param trained_model:
@@ -112,27 +95,19 @@ class Model(object):
         :param rnn_dim:
         :param rnn_num:
         :param drop_out:
-        :param rad_dim: n
         :param emb:
-        :param ngram_embedding: 预训练 ngram embeddig 文件
-        :param pixels:
-        :param con_width:
-        :param filters:
-        :param pooling_size:
         :return:
         """
         # trained_model: 模型存储路径
         if trained_model is not None:
             param_dic = {'nums_chars': self.nums_chars, 'nums_tags': self.nums_tags, 'tag_scheme': self.tag_scheme,
-                         'graphic': self.graphic, 'pic_size': self.pic_size, 'word_vec': self.word_vec,
-                         'radical': self.radical, 'crf': self.crf, 'emb_dim': emb_dim, 'gru': gru, 'rnn_dim': rnn_dim,
-                         'rnn_num': rnn_num, 'drop_out': drop_out, 'filter_size': con_width, 'filters': filters,
-                         'pooling_size': pooling_size, 'font': self.font, 'buckets_char': self.buckets_char,
-                         'ngram': self.ngram}
+                         'crf': self.crf, 'emb_dim': emb_dim, 'gru': gru, 'rnn_dim': rnn_dim,
+                         'rnn_num': rnn_num, 'drop_out': drop_out,
+                         'buckets_char': self.buckets_char,
+                         }
             print "RNN dimension is %d" % rnn_dim
             print "RNN number is %d" % rnn_num
             print "Character embedding size is %d" % emb_dim
-            print "Ngram embedding dimension is %d" % emb_dim
             # 存储模型超参数
             if self.metric == 'All':
                 # rindex() 返回子字符串 str 在字符串中最后出现的位置
@@ -157,49 +132,7 @@ class Model(object):
         # 为什么字符数要加 500 ？
         # emb_dim 是每个字符的特征向量维度，可以通过命令行参数设置
         # weights 表示预训练的字向量，可以通过命令行参数设置
-        if self.word_vec:
-            self.emb_layer = EmbeddingLayer(self.nums_chars + 500, emb_dim, weights=emb, name='emb_layer')
-
-        # 偏旁部首向量
-        # 依照《康熙字典》，共有 214 个偏旁部首。
-        # 只用了常见汉字的偏旁部首，非常见汉字和非汉字的偏旁部首用其他两个特殊符号代替，
-        # 所以共有 216 个偏旁部首
-        if self.radical:
-            self.radical_layer = EmbeddingLayer(216, rad_dim, name='radical_layer')
-
-        if self.ngram is not None:
-            if ngram_embedding is not None:
-                assert len(ngram_embedding) == len(self.ngram)
-            else:
-                ngram_embedding = [None for _ in range(len(self.ngram))]
-            for i, n_gram in enumerate(self.ngram):
-                self.gram_layers.append(EmbeddingLayer(n_gram + 1000 * (i + 2), emb_dim, weights=ngram_embedding[i],
-                                                       name=str(i + 2) + 'gram_layer'))
-
-        wrapper_conv_1, wrapper_mp_1, wrapper_conv_2, wrapper_mp_2, wrapper_dense, wrapper_dr = \
-            None, None, None, None, None, None
-
-        if self.graphic:
-            # 使用图像信息，需要用到 CNN
-            self.input_p = []
-            assert pixels is not None and filters is not None and pooling_size is not None and con_width is not None
-
-            self.pixels = pixels
-            pixel_dim = int(math.sqrt(len(pixels[0])))
-
-            wrapper_conv_1 = TimeDistributed(Convolution(con_width, 1, filters, name='conv_1'), name='wrapper_c1')
-            wrapper_mp_1 = TimeDistributed(Maxpooling(pooling_size, pooling_size, name='pooling_1'), name='wrapper_p1')
-
-            p_size_1 = toolbox.down_pool(pixel_dim, pooling_size)
-
-            wrapper_conv_2 = TimeDistributed(Convolution(con_width, filters, filters, name='conv_2'), name='wrapper_c2')
-            wrapper_mp_2 = TimeDistributed(Maxpooling(pooling_size, pooling_size, name='pooling_2'), name='wrapper_p2')
-
-            p_size_2 = toolbox.down_pool(p_size_1, pooling_size)
-
-            wrapper_dense = TimeDistributed(
-                HiddenLayer(p_size_2 * p_size_2 * filters, 100, activation='tanh', name='conv_dense'), name='wrapper_3')
-            wrapper_dr = TimeDistributed(DropoutLayer(self.drop_out), name='wrapper_dr')
+        self.emb_layer = EmbeddingLayer(self.nums_chars + 500, emb_dim, weights=emb, name='emb_layer')
 
         with tf.variable_scope('BiRNN'):
 
@@ -236,99 +169,14 @@ class Model(object):
 
             self.input_v.append([input_sentences])
 
-            emb_set = []
-
-            if self.word_vec:
-                # 根据 one-hot 向量查找对应的字向量
-                # word_out: shape=(batch_size, 句子长度，字向量维度（64）)
-                word_out = self.emb_layer(input_sentences)
-                emb_set.append(word_out)
-
-            if self.radical:
-                # 嵌入偏旁部首信息，shape = (batch_size, 句子长度)
-                input_radicals = tf.placeholder(tf.int32, [None, bucket], name='input_r' + str(bucket))
-
-                self.input_v[-1].append(input_radicals)
-                radical_out = self.radical_layer(input_radicals)
-                emb_set.append(radical_out)
-
-            if self.ngram is not None:
-                for i in range(len(self.ngram)):
-                    input_g = tf.placeholder(tf.int32, [None, bucket], name='input_g' + str(i) + str(bucket))
-                    self.input_v[-1].append(input_g)
-                    gram_out = self.gram_layers[i](input_g)
-                    emb_set.append(gram_out)
-
-            if self.graphic:
-                input_p = tf.placeholder(tf.float32, [None, bucket, pixel_dim * pixel_dim])
-                self.input_p.append(input_p)
-
-                pix_out = tf.reshape(input_p, [-1, bucket, pixel_dim, pixel_dim, 1])
-
-                conv_out_1 = wrapper_conv_1(pix_out)
-                pooling_out_1 = wrapper_mp_1(conv_out_1)
-
-                conv_out_2 = wrapper_conv_2(pooling_out_1)
-                pooling_out_2 = wrapper_mp_2(conv_out_2)
-
-                assert p_size_2 == pooling_out_2[0].get_shape().as_list()[1]
-                pooling_out = tf.reshape(pooling_out_2, [-1, bucket, p_size_2 * p_size_2 * filters])
-                pooling_out = tf.unstack(pooling_out, axis=1)
-
-                graphic_out = wrapper_dense(pooling_out)
-                graphic_out = wrapper_dr(graphic_out)
-
-                emb_set.append(graphic_out)
-
-            if self.window_size > 1:
-
-                padding_size = int(np.floor(self.window_size / 2))
-                word_padded = tf.pad(word_out, [[0, 0], [padding_size, padding_size], [0, 0]], 'CONSTANT')
-
-                Ws = []
-                for q in range(1, self.window_size + 1):
-                    Ws.append(tf.get_variable("W_%d" % q, shape=[q * emb_dim, self.filters_number]))
-                b = tf.get_variable("b", shape=[self.filters_number])
-
-                z = [None for _ in range(0, bucket)]
-
-                for q in range(1, self.window_size + 1):
-                    for i in range(padding_size, bucket + padding_size):
-                        low = i - int(np.floor((q - 1) / 2))
-                        high = i + int(np.ceil((q + 1) / 2))
-                        x = word_padded[:, low, :]
-                        for j in range(low + 1, high):
-                            x = tf.concat(values=[x, word_padded[:, j, :]], axis=1)
-                        z_iq = tf.tanh(tf.nn.xw_plus_b(x, Ws[q - 1], b))
-                        if z[i - padding_size] is None:
-                            z[i - padding_size] = z_iq
-                        else:
-                            z[i - padding_size] = tf.concat([z[i - padding_size], z_iq], axis=1)
-
-                z = tf.stack(z, axis=1)
-                values, indices = tf.nn.top_k(z, sorted=False, k=emb_dim)
-
-                # highway layer
-                X = tf.unstack(word_out, axis=1)
-                Conv_X = tf.unstack(values, axis=1)
-                X_hat = []
-                W_t = tf.get_variable("W_t", shape=[emb_dim, emb_dim])
-                b_t = tf.get_variable("b_t", shape=[emb_dim])
-                for x, conv_x in zip(X, Conv_X):
-                    T_x = tf.sigmoid(tf.nn.xw_plus_b(x, W_t, b_t))
-                    X_hat.append(tf.multiply(conv_x, T_x) + tf.multiply(x, 1 - T_x))
-                X_hat = tf.stack(X_hat, axis=1)
-                emb_set.append(X_hat)
-            if len(emb_set) > 1:
-                # 各种字向量直接 concat 起来（字向量、偏旁部首、n-gram、图像信息等）
-                emb_out = tf.concat(axis=2, values=emb_set)
-
-            else:
-                emb_out = emb_set[0]
+            # 根据 one-hot 向量查找对应的字向量
+            # word_out: shape=(batch_size, 句子长度，字向量维度（64）)
+            word_embeddings = self.emb_layer(input_sentences)
 
             # rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
+            highway_out = self.highway(word_embeddings, name="tag")
             rnn_out = BiLSTM(rnn_dim, fw_cell=fw_rnn_cell, bw_cell=bw_rnn_cell, p=dr,
-                             name='BiLSTM' + str(bucket), scope='BiRNN')(self.highway(emb_out, "tag"), input_sentences)
+                             name='BiLSTM' + str(bucket), scope='BiRNN')(highway_out, input_sentences)
 
             # 应用全连接层，Wx+b 得到最后的输出
             output = output_wrapper(rnn_out)
@@ -355,7 +203,7 @@ class Model(object):
             lm_rnn_output = BiLSTM(lm_rnn_dim, fw_cell=lm_fw_rnn_cell,
                                    bw_cell=lm_bw_rnn_cell, p=dr,
                                    name='LM-BiLSTM' + str(bucket),
-                                   scope='LM-BiRNN')(self.highway(emb_set[0]), input_sentences)
+                                   scope='LM-BiRNN')(self.highway(word_embeddings), input_sentences)
 
             lm_output_wrapper = TimeDistributed(
                 HiddenLayer(lm_rnn_dim * 2, self.nums_chars + 2, activation='linear', name='lm_hidden'),
@@ -441,8 +289,6 @@ class Model(object):
                 train_step = optimizer.minimize(l)
             print 'Bucket %d, %f seconds' % (idx + 1, time() - t2)
             self.train_steps.append(train_step)
-
-        self.merged_summary = tf.summary.merge_all()
 
     def decode_graph(self):
         self.decode_holders = []
@@ -565,18 +411,15 @@ class Model(object):
                 real_batch_size = self.real_batches[idx]
                 # 当前 bucket 的模型的输入和输出（注意每个 bucket 都有一个单独的模型）
                 model_placeholders = self.input_v[idx] + self.output_[idx] + self.lm_groundtruthes[idx]
-                pt_holder = None
-                if self.graphic:
-                    pt_holder = self.input_p[idx]
                 # sess[0] 是 main_sess, sess[1] 是 decode_sess(如果使用 CRF 的话)
                 # 训练当前的 bucket，这个函数里面才真正地为模型填充了数据并运行(以 real_batch_size 为单位，将 bucket 中的句子依次喂给模型)
                 # 被 sess.run 的是 config=self.train_step[idx]，train_step[idx] 就会触发 BP 更新参数了
                 Batch.train(sess=sess[0], placeholders=model_placeholders, batch_size=real_batch_size,
-                            train_step=self.train_steps[idx],loss=self.losses[idx],
+                            train_step=self.train_steps[idx], loss=self.losses[idx],
                             lr=self.l_rate, lrv=lr_r, dr=self.drop_out, drv=self.drop_out_v, data=list(sample),
                             # debug_variable=[self.lm_output[idx], self.lm_output_[idx], self.output[idx], self.output_[idx]],
-                            pt_h=pt_holder, pixels=self.pixels, verbose=False,
-                            merged_summary=self.merged_summary, log_writer=train_writer,
+                            verbose=False,
+                            log_writer=train_writer,
                             single_summary=self.summaries[idx], epoch_index=epoch)
 
             predictions = []
@@ -585,11 +428,9 @@ class Model(object):
                 # v_b_x: shape=(4,bucket 中句子个数，句子长度)
                 c_len = len(v_b_x[0][0])
                 idx = self.bucket_dit[c_len]
-                pt_holder = None
-                if self.graphic:
-                    pt_holder = self.input_p[idx]
+
                 b_prediction = self.predict(data=v_b_x, sess=sess, model=self.input_v[idx] + self.output[idx],
-                                            index=idx, pt_h=pt_holder, pt=self.pixels, batch_size=100)
+                                            index=idx, batch_size=100)
                 b_prediction = toolbox.decode_tags(b_prediction, idx2tag, self.tag_scheme)
                 predictions.append(b_prediction)
 
@@ -662,7 +503,7 @@ class Model(object):
             print 'Best POS Tagging ' + metric + ': %f' % best_pos[metric]
             print 'Best epoch: %d\n' % best_epoch[metric]
 
-    def define_updates(self, new_chars, emb_path, char2idx, new_grams=None, ng_emb_path=None, gram2idx=None):
+    def define_updates(self, new_chars, emb_path, char2idx):
 
         self.nums_chars += len(new_chars)
 
@@ -681,16 +522,6 @@ class Model(object):
                 assign_op = old_emb_weights.assign(new_emb_weights)
                 self.updates.append(assign_op)
 
-        if self.ngram is not None and ng_emb_path is not None:
-            old_gram_weights = [ng_layer.embeddings for ng_layer in self.gram_layers]
-            ng_emb_dim = old_gram_weights[0].get_shape().as_list()[1]
-            new_ng_emb = toolbox.get_new_ng_embeddings(new_grams, ng_emb_dim, ng_emb_path)
-            for i in range(len(old_gram_weights)):
-                new_ng_weight = tf.concat(axis=0, values=[old_gram_weights[i][:len(gram2idx[i]) - len(new_grams[i])],
-                                                          new_ng_emb[i], old_gram_weights[i][len(gram2idx[i]):]])
-                assign_op = old_gram_weights[i].assign(new_ng_weight)
-                self.updates.append(assign_op)
-
     def run_updates(self, sess, weight_path):
         self.saver.restore(sess, weight_path)
         for op in self.updates:
@@ -705,12 +536,7 @@ class Model(object):
         chars = toolbox.decode_chars(t_x[0], idx2char)
         gold_out = toolbox.generate_output(chars, gold, self.tag_scheme)
 
-        pt_holder = None
-        if self.graphic:
-            pt_holder = self.input_p[0]
-
-        prediction = self.predict(data=t_x, sess=sess, model=self.input_v[0] + self.output[0], index=0, pt_h=pt_holder,
-                                  pt=self.pixels, ensemble=ensemble, batch_size=batch_size)
+        prediction = self.predict(data=t_x, sess=sess, model=self.input_v[0] + self.output[0], index=0, ensemble=ensemble, batch_size=batch_size)
         prediction = toolbox.decode_tags(prediction, idx2tag, self.tag_scheme)
         prediction_out = toolbox.generate_output(chars, prediction, self.tag_scheme)
 
@@ -745,17 +571,13 @@ class Model(object):
 
         r_x[0][r_x[0] > char_num - 1] = char2idx['<UNK>']
 
-        pt_holder = None
-        if self.graphic:
-            pt_holder = self.input_p[0]
-
         c_len = len(r_x[0][0])
         idx = self.bucket_dit[c_len]
 
         real_batch = int(batch_size * 300 / c_len)
 
         prediction = self.predict(data=r_x, sess=sess, model=self.input_v[idx] + self.output[idx], index=idx,
-                                  pt_h=pt_holder, pt=self.pixels, ensemble=ensemble, batch_size=real_batch)
+                                  ensemble=ensemble, batch_size=real_batch)
         prediction = toolbox.decode_tags(prediction, idx2tag, self.tag_scheme)
         prediction_out = toolbox.generate_output(chars, prediction, self.tag_scheme)
 
@@ -787,7 +609,7 @@ class Model(object):
             predictions = Batch.predict(sess=sess[0], decode_sess=sess[1], model=model,
                                         transitions=self.transition_char, crf=self.crf, scores=self.scores[index],
                                         decode_holders=self.decode_holders[index], argmax=argmax, batch_size=batch_size,
-                                        data=data, dr=self.drop_out, pixels=pt, pt_h=pt_h, ensemble=ensemble,
+                                        data=data, dr=self.drop_out, ensemble=ensemble,
                                         verbose=verbose)
         else:
             predictions = Batch.predict(sess=sess[0], model=model, crf=self.crf, argmax=argmax, batch_size=batch_size,

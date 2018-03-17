@@ -23,22 +23,8 @@ parser.add_argument('-m', '--model', default='trained_model', help='Name of the 
 parser.add_argument('-tg', '--tag_scheme', default='BIES', help='Tagging scheme')
 parser.add_argument('-crf', '--crf', default=1, type=int, help='Using CRF interface')
 
-parser.add_argument('-ws', '--window_size', default=0, type=int, help='The biggest CNN window\'s size')
-parser.add_argument('-fn', '--filters_number', default=100, type=int, help='CNN filter number')
-
-parser.add_argument('-ng', '--ngram', default=3, type=int, help='Using ngrams')
-
-parser.add_argument('-wv', '--word_vector', default=False, help='Whether using word vectors', action='store_true')
 parser.add_argument('-emb', '--embeddings', default=None, help='Path and name of pre-trained char embeddings')
-parser.add_argument('-nemb', '--ngram_embeddings', default=None, help='Path and name of pre-trained ngram embeddings')
 parser.add_argument('-ed', '--embeddings_dimension', default=64, type=int, help='Dimension of the embeddings')
-
-parser.add_argument('-rd', '--radical', default=False, help='Whether using radicals', action='store_true')
-parser.add_argument('-rded', '--radical_dimension', default=30, type=int, help='Dimension of the radical embeddings')
-
-parser.add_argument('-pt', '--pixels', default=False, help='Whether employing the orthographical features', action='store_true')
-parser.add_argument('-pts', '--picture_size', default=30, type=int, help='The size of generated character pictures.')
-parser.add_argument('-ft', '--font', default='simsun.ttc', help='The font for generating the characters.')
 
 parser.add_argument('-bt', '--bucket_size', default=10, type=int, help='Bucket size')
 
@@ -47,10 +33,6 @@ parser.add_argument('-rnn', '--rnn_cell_dimension', default=200, type=int, help=
 parser.add_argument('-layer', '--rnn_layer_number', default=1, type=int, help='Numbers of the RNN layers')
 
 parser.add_argument('-dr', '--dropout_rate', default=0.5, type=float, help='Dropout rate')
-
-parser.add_argument('-fs', '--filter_size', default=5, type=int, help='Size of the convolutinal filters')
-
-parser.add_argument('-mp', '--max_pooling', default=2, type=int, help='Max pooling size')
 
 parser.add_argument('-iter', '--epochs', default=30, type=int, help='Numbers of epochs')
 parser.add_argument('-op', '--optimizer', default='adagrad', help='Optimizer')
@@ -95,72 +77,37 @@ if args.action == 'train':
     print 'Reading data......'
 
     # 统计文本信息
-    if args.ngram > 1 and not os.path.isfile(path + '/' + str(args.ngram) + 'gram.txt') \
+    ngram = 3
+    if not os.path.isfile(path + '/' + str(ngram) + 'gram.txt') \
             or (not os.path.isfile(path + '/' + 'chars.txt')):
-        toolbox.get_vocab_tag(path, [train_file, dev_file], ngram=args.ngram)
+        toolbox.get_vocab_tag(path, [train_file, dev_file], ngram=ngram)
     # 读取文本信息
-    chars, tags, ngram = toolbox.read_vocab_tag(path, args.ngram)
+    chars, tags, ngram = toolbox.read_vocab_tag(path, ngram)
 
-    # 读取预训练字向量
     emb = None
     emb_dim = args.embeddings_dimension
-    if args.word_vector:
-        if args.embeddings is not None:
-            print 'Reading embeddings...'
-            short_emb = args.embeddings[args.embeddings.index('/') + 1: args.embeddings.index('.')]
-            if not os.path.isfile(path + '/' + short_emb + '_sub.txt'):
-                toolbox.get_sample_embedding(path, args.embeddings, chars)
-            emb_dim, emb = toolbox.read_sample_embedding(path, short_emb)
-            assert args.embeddings_dimension == emb_dim
-        else:
-            print 'Using random embeddings...'
+    if args.embeddings is not None:
+        # 读取预训练字向量
+        print 'Reading embeddings...'
+        short_emb = args.embeddings[args.embeddings.index('/') + 1: args.embeddings.index('.')]
+        if not os.path.isfile(path + '/' + short_emb + '_sub.txt'):
+            toolbox.get_sample_embedding(path, args.embeddings, chars)
+        emb_dim, emb = toolbox.read_sample_embedding(path, short_emb)
+        assert args.embeddings_dimension == emb_dim
     else:
-        assert args.pixels
-
-    # 读取偏旁部首字典
-    rad_dic = None
-    if args.radical:
-        print 'Using Radical dictionary...'
-        rad_dic = toolbox.get_radical_dic()
-
-    # 读取字符图像信息
-    pixels = None
-    if args.pixels:
-        print 'Reading characters as pixels...'
-        font_name = args.font[:args.font.index('.')]
-        if not os.path.isfile(path + '/' + font_name + str(args.picture_size) + '_pixels.txt'):
-            toolbox.get_chars_pixels(path, chars, args.font, args.picture_size)
-        pixels = toolbox.read_chars_pixels(path, font_name, args.picture_size)
+        print 'Using random embeddings...'
 
     char2idx, idx2char, tag2idx, idx2tag = toolbox.get_dic(chars, tags)
 
     # train_x: shape=(2,句子数量)，2 表示字符本身+偏旁部首
     train_x, train_y, train_max_slen_c, train_max_slen_w, train_max_wlen = \
-        toolbox.get_input_vec(path, train_file, char2idx, tag2idx, rad_dic=rad_dic, tag_scheme=args.tag_scheme)
+        toolbox.get_input_vec(path, train_file, char2idx, tag2idx, tag_scheme=args.tag_scheme)
     dev_x, dev_y, dev_max_slen_c, dev_max_slen_w, dev_max_wlen = \
-        toolbox.get_input_vec(path, dev_file, char2idx, tag2idx, rad_dic=rad_dic, tag_scheme=args.tag_scheme)
+        toolbox.get_input_vec(path, dev_file, char2idx, tag2idx, tag_scheme=args.tag_scheme)
 
     # 读取 ngram 向量
     nums_grams = None
     ng_embeddings = None
-
-    if args.ngram > 1:
-        gram2idx = toolbox.get_ngram_dic(ngram)
-        train_gram = toolbox.get_gram_vec(path, train_file, gram2idx)
-        dev_gram = toolbox.get_gram_vec(path, dev_file, gram2idx)
-        # 这一句后 train_x： shape=(4,句子数量)，因为加了 2gram 和 3gram
-        train_x += train_gram
-        dev_x += dev_gram
-        nums_grams = []
-        for dic in gram2idx:
-            nums_grams.append(len(dic.keys()))
-
-        if args.ngram_embeddings is not None:
-            print 'Reading N-gram Embeddings...'
-            short_ng_emb = args.ngram_embeddings[args.ngram_embeddings.index('/') + 1:]
-            if not os.path.isfile(path + '/' + short_ng_emb + '_' + str(args.ngram) + 'gram_sub.txt'):
-                toolbox.get_ngram_embedding(path, args.ngram_embeddings, ngram)
-            ng_embeddings = toolbox.read_ngram_embedding(path, short_ng_emb, args.ngram)
 
     tag_map = {'seg': 0, 'BI': 1, 'BIE': 2, 'BIES': 3}
 
@@ -170,7 +117,6 @@ if args.action == 'train':
 
     print 'Longest sentence by character is %d. ' % max_step_c
     print 'Longest sentence by word is %d. ' % max_step_w
-
     print 'Longest word is %d. ' % max_w_len
 
     # b_train_x: shape=(4, bucket 数量，)
@@ -201,17 +147,15 @@ if args.action == 'train':
     with main_graph.as_default():
         with tf.variable_scope("tagger", reuse=None, initializer=initializer) as scope:
             # 初始化 model
-            model = Model(window_size=args.window_size, filters_number=args.filters_number, nums_chars=len(chars) + 2,
-                          nums_tags=nums_tags, buckets_char=b_buckets, counts=b_counts, font=args.font,
-                          tag_scheme=args.tag_scheme, word_vec=args.word_vector, graphic=args.pixels,
-                          pic_size=args.picture_size, radical=args.radical, crf=args.crf, ngram=nums_grams,
+            model = Model(nums_chars=len(chars) + 2,
+                          nums_tags=nums_tags, buckets_char=b_buckets, counts=b_counts,
+                          tag_scheme=args.tag_scheme,
+                          crf=args.crf,
                           batch_size=args.train_batch, metric=args.op_metric)
             # 构建 graph，即字符输入=>字向量=>BiLSTM=>全连接层的整个模型图
             model.main_graph(trained_model=path + '/' + model_file + '_model', scope=scope, emb_dim=emb_dim,
                              gru=args.gru, rnn_dim=args.rnn_cell_dimension, rnn_num=args.rnn_layer_number,
-                             emb=emb, ngram_embedding=ng_embeddings, drop_out=args.dropout_rate, pixels=pixels,
-                             rad_dim=args.radical_dimension, con_width=args.filter_size, filters=args.filters_number,
-                             pooling_size=args.max_pooling)
+                             emb=emb, drop_out=args.dropout_rate)
         t = time()
         # 根据指定参数策略计算损失函数，计算梯度，应用梯度下降
         model.config(optimizer=args.optimizer, decay=args.decay_rate,
@@ -256,7 +200,6 @@ else:
 
     model_file = args.model
     emb_path = args.embeddings
-    ng_emb_path = args.ngram_embeddings
 
     if args.ensemble:
         if not os.path.isfile(path + '/' + model_file + '_1_model') or not os.path.isfile(path + '/' + model_file + '_1_weights.index'):
@@ -275,28 +218,16 @@ else:
     nums_chars = param_dic['nums_chars']
     nums_tags = param_dic['nums_tags']
     tag_scheme = param_dic['tag_scheme']
-    word_vector = param_dic['word_vec']
-    graphic = param_dic['graphic']
-    radical = param_dic['radical']
     crf = param_dic['crf']
     emb_dim = param_dic['emb_dim']
-    pic_size = param_dic['pic_size']
-    # pixels = param_dic['pixels']
     gru = param_dic['gru']
     rnn_dim = param_dic['rnn_dim']
     rnn_num = param_dic['rnn_num']
     drop_out = param_dic['drop_out']
-    con_width = param_dic['filter_size']
-    cv_kernels = param_dic['filters']
-    pooling_size = param_dic['pooling_size']
-    font = param_dic['font']
     buckets_char = param_dic['buckets_char']
-    num_ngram = param_dic['ngram']
 
     ngram = 1
     gram2idx = None
-    if num_ngram is not None:
-        ngram = len(num_ngram) +1
 
     chars, tags, grams = toolbox.read_vocab_tag(path, ngram)
     char2idx, idx2char, tag2idx, idx2tag = toolbox.get_dic(chars, tags)
@@ -315,13 +246,6 @@ else:
 
     s_time = None
 
-    if radical:
-        rad_dic = toolbox.get_radical_dic()
-
-    if graphic:
-        font_name = font[:font.index('.')]
-        pixels = toolbox.read_chars_pixels(path, font_name, pic_size)
-
     s_time = time()
     if args.action == 'test':
         assert args.test is not None
@@ -338,7 +262,7 @@ else:
         char2idx, idx2char, unk_char2idx = toolbox.update_char_dict(char2idx, new_chars, valid_chars)
 
         test_x, test_y, test_max_slen_c, test_max_slen_w, test_max_wlen = \
-            toolbox.get_input_vec(path, test_file, char2idx, tag2idx, tag_scheme=tag_scheme, rad_dic=rad_dic)
+            toolbox.get_input_vec(path, test_file, char2idx, tag2idx, tag_scheme=tag_scheme)
 
         print 'Test set: %d instances.' % len(test_x[0])
 
@@ -348,20 +272,6 @@ else:
         print 'Longest sentence by word is %d. ' % test_max_slen_w
 
         print 'Longest word is %d. ' % test_max_wlen
-
-        if graphic:
-            new_pixels = toolbox.get_new_pixels(new_chars, font, pic_size)
-            pixels += new_pixels
-
-        if ngram > 1:
-            gram2idx = toolbox.get_ngram_dic(grams)
-            new_grams = toolbox.get_new_grams(path + '/' + test_file, gram2idx)
-            if args.ngram_embeddings is not None:
-                new_grams = toolbox.get_valid_grams(new_grams, args.ngram_embeddings)
-                gram2idx = toolbox.update_gram_dicts(gram2idx, new_grams)
-
-            test_gram = toolbox.get_gram_vec(path, test_file, gram2idx)
-            test_x += test_gram
 
         for k in range(len(test_x)):
             test_x[k] = toolbox.pad_zeros(test_x[k], max_step)
@@ -385,7 +295,7 @@ else:
 
         if not args.tag_large:
 
-            raw_x, raw_len = toolbox.get_input_vec_raw(None, raw_file, char2idx, rad_dic=rad_dic)
+            raw_x, raw_len = toolbox.get_input_vec_raw(None, raw_file, char2idx)
             print 'Numbers of sentences: %d.' % len(raw_x[0])
             max_step = raw_len
 
@@ -394,23 +304,6 @@ else:
 
         print 'Longest sentence is %d. ' % max_step
 
-        if graphic:
-            new_pixels = toolbox.get_new_pixels(new_chars, font, pic_size)
-            pixels += new_pixels
-
-        if ngram > 1:
-
-            gram2idx = toolbox.get_ngram_dic(grams)
-
-            if args.ngram_embeddings is not None:
-                new_grams = toolbox.get_new_grams(raw_file, gram2idx, type='raw')
-                new_grams = toolbox.get_valid_grams(new_grams, args.ngram_embeddings)
-                gram2idx = toolbox.update_gram_dicts(gram2idx, new_grams)
-
-            if not args.tag_large:
-
-                raw_gram = toolbox.get_gram_vec(None, raw_file, gram2idx, is_raw=True)
-                raw_x += raw_gram
 
         if not args.tag_large:
             for k in range(len(raw_x)):
@@ -426,8 +319,7 @@ else:
         with tf.variable_scope("tagger") as scope:
             if args.action == 'test' or (args.action == 'tag' and not args.tag_large):
                 model = Model(nums_chars=nums_chars, nums_tags=nums_tags, buckets_char=[max_step], counts=[200],
-                              font=font, pic_size=pic_size, tag_scheme=tag_scheme, word_vec=word_vector,
-                              graphic=graphic, radical=radical, crf=crf, ngram=num_ngram, batch_size=args.tag_batch)
+                              tag_scheme=tag_scheme, crf=crf, batch_size=args.tag_batch)
             else:
                 bt_chars = []
                 bt_len = args.bucket_size
@@ -439,13 +331,10 @@ else:
                     bt_chars.append(max_step)
                 bt_counts = [200] * len(bt_chars)
                 model = Model(nums_chars=nums_chars, nums_tags=nums_tags, buckets_char=bt_chars, counts=bt_counts,
-                              font=font, pic_size=pic_size, tag_scheme=tag_scheme, word_vec=word_vector,
-                              graphic=graphic, radical=radical, crf=crf, ngram=num_ngram, batch_size=args.tag_batch)
+                              tag_scheme=tag_scheme, crf=crf, batch_size=args.tag_batch)
             model.main_graph(trained_model=None, scope=scope, emb_dim=emb_dim, gru=gru, rnn_dim=rnn_dim,
-                             rnn_num=rnn_num, drop_out=drop_out, pixels=pixels, con_width=con_width,
-                             filters=cv_kernels, pooling_size=pooling_size)
-        model.define_updates(new_chars=new_chars, emb_path=emb_path, char2idx=char2idx, new_grams=new_grams,
-                             ng_emb_path=ng_emb_path, gram2idx=gram2idx)
+                             rnn_num=rnn_num, drop_out=drop_out)
+        model.define_updates(new_chars=new_chars, emb_path=emb_path, char2idx=char2idx)
         init = tf.global_variables_initializer()
 
         print 'Done. Time consumed: %d seconds' % int(time() - t)
