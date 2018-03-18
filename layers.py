@@ -201,7 +201,7 @@ class BiRNN(object):
 
     def __init__(self, cell_dim, nums_layers=1, p=0.5,
                  concat_output=True, output_state=False, name='BiRNN',
-                 gru=False, scope="BiRNN"):
+                 gru=True, scope="BiRNN"):
         """
 
         :param cell_dim: RNN 隐藏层神经元个数，默认设置是 200
