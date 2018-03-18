@@ -3,13 +3,15 @@ import tensorflow as tf
 import numpy as np
 import math
 
-# 隐藏层，或者叫全连接层，即计算 activation(Wx+b) 的一层 
+
+# 隐藏层，或者叫全连接层，即计算 activation(Wx+b) 的一层
 class HiddenLayer(object):
     """
     Hidden layer with or without bias.
     Input: tensor of dimension (dims*, input_dim)
     Output: tensor of dimension (dims*, output_dim)
     """
+
     def __init__(self, input_dim, output_dim, bias=True, activation='tanh', name='hidden_layer'):
         """
         :param input_dim: rnn_dim * 2（双向 RNN）
@@ -68,6 +70,7 @@ class EmbeddingLayer(object):
     Input: tensor of dimension (dim*) with values in range(0, input_dim)
     Output: tensor of dimension (dim*, output_dim)
     """
+
     def __init__(self, input_dim, output_dim, weights=None, is_variable=False, trainable=True, name='embedding_layer'):
         """
         :param input_dim: 字表大小
@@ -83,7 +86,8 @@ class EmbeddingLayer(object):
         # Generate random embeddings or read pre-trained embeddings
         rand_uniform_init = tf.contrib.layers.xavier_initializer()
         if self.weights is None:
-            self.embeddings = tf.get_variable(self.name + '_emb', [self.input_dim, self.output_dim], initializer=rand_uniform_init, trainable=self.trainable)
+            self.embeddings = tf.get_variable(self.name + '_emb', [self.input_dim, self.output_dim],
+                                              initializer=rand_uniform_init, trainable=self.trainable)
         elif is_variable:
             self.embeddings = weights
         else:
@@ -113,6 +117,7 @@ class Convolution(object):
     '''
     Regular convolutional layer
     '''
+
     @staticmethod
     def weight_variable(shape, name):
         initial = tf.truncated_normal(shape, stddev=0.1)
@@ -123,7 +128,8 @@ class Convolution(object):
         initial = tf.constant(0.1, shape=shape, name=name)
         return tf.Variable(initial)
 
-    def __init__(self, conv_width, in_channels, out_channels, stride=1, dim=2, padding='SAME', name='convolutional_layer'):
+    def __init__(self, conv_width, in_channels, out_channels, stride=1, dim=2, padding='SAME',
+                 name='convolutional_layer'):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.dim = dim
@@ -135,9 +141,11 @@ class Convolution(object):
         self.name = name
         self.conv_width = conv_width
         if dim == 1:
-            self.w_conv = self.weight_variable([self.conv_width, self.in_channels, self.out_channels], name=self.name + '_w')
+            self.w_conv = self.weight_variable([self.conv_width, self.in_channels, self.out_channels],
+                                               name=self.name + '_w')
         else:
-            self.w_conv = self.weight_variable([self.conv_width, self.conv_width, self.in_channels, self.out_channels], name=self.name + '_w')
+            self.w_conv = self.weight_variable([self.conv_width, self.conv_width, self.in_channels, self.out_channels],
+                                               name=self.name + '_w')
         self.b_conv = self.bias_variable([self.out_channels], name=self.name + '_b')
 
     def conv2d(self, x, W):
@@ -153,11 +161,11 @@ class Convolution(object):
             return tf.nn.relu(self.conv2d(input_t, self.w_conv) + self.b_conv)
 
 
-
 class Maxpooling(object):
     '''
     Maxpooling layer
     '''
+
     def __init__(self, pooling_size, stride=1, padding='SAME', name='pooling_layer'):
         self.padding = padding
         self.name = name
@@ -171,12 +179,13 @@ class DropoutLayer(object):
     """
     Dropout layer
     """
+
     def __init__(self, p=0.5, name='dropout_layer'):
         """
         :param p: dropout rate
         :param name:
         """
-        #assert 0. <= p < 1
+        # assert 0. <= p < 1
         self.p = p
         self.name = name
 
@@ -185,37 +194,47 @@ class DropoutLayer(object):
         return tf.nn.dropout(self.input, keep_prob=1 - self.p, name=self.name)
 
 
-class BiLSTM(object):
+class BiRNN(object):
     """
     Bidirectional LSTM
     """
-    def __init__(self, cell_dim, nums_layers=1, p=0.5, fw_cell=None, bw_cell=None, state=False, name='biLSTM', scope=None):
+
+    def __init__(self, cell_dim, nums_layers=1, p=0.5,
+                 concat_output=True, output_state=False, name='BiRNN',
+                 gru=False, scope="BiRNN"):
         """
 
         :param cell_dim: RNN 隐藏层神经元个数，默认设置是 200
         :param nums_layers: RNN 层数（深度）
         :param p: dropout 概率
-        :param fw_cell: 前向 RNN 单元
-        :param bw_cell: 后向 RNN 单元
-        :param state:
-        :param name: 每个 bucket 有一个 BiLSTM，名称为 'BiLSTM' + str(bucket)
+        :param name: 每个 bucket 有一个 BiRNN，名称为 'BiRNN' + str(bucket)
         :param scope: “BiRNN”
         """
         self.cell_dim = cell_dim
         self.nums_layers = nums_layers
         self.p = p
-        self.state = state
+        self.concat_output = concat_output
+        self.output_state = output_state
         self.name = name
         self.scope = scope
-        if fw_cell is None:
-            self.lstm_cell_fw = tf.nn.rnn_cell.LSTMCell(self.cell_dim, state_is_tuple=True)
-        else:
-            self.lstm_cell_fw = fw_cell
-        if bw_cell is None:
-            self.lstm_cell_bw = tf.nn.rnn_cell.LSTMCell(self.cell_dim, state_is_tuple=True)
-        else:
-            self.lstm_cell_bw = bw_cell
-        # assert 0. <= p < 1
+        self.gru = gru
+        with tf.variable_scope(scope):
+            if gru:
+                fw_rnn_cell = tf.nn.rnn_cell.GRUCell(cell_dim)
+                bw_rnn_cell = tf.nn.rnn_cell.GRUCell(cell_dim)
+            else:
+                fw_rnn_cell = tf.nn.rnn_cell.LSTMCell(cell_dim, state_is_tuple=True)
+                bw_rnn_cell = tf.nn.rnn_cell.LSTMCell(cell_dim, state_is_tuple=True)
+
+            # self.lstm_cell_fw = tf.contrib.rnn.AttentionCellWrapper(self.lstm_cell_fw, 5)
+            # self.lstm_cell_bw = tf.contrib.rnn.AttentionCellWrapper(self.lstm_cell_bw, 5)
+            # if self.p > 0.:
+            self.fw_rnn_cell = tf.nn.rnn_cell.DropoutWrapper(fw_rnn_cell, output_keep_prob=(1 - self.p))
+            self.bw_rnn_cell = tf.nn.rnn_cell.DropoutWrapper(bw_rnn_cell, output_keep_prob=(1 - self.p))
+
+            if nums_layers > 1:
+                self.fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([self.fw_rnn_cell] * nums_layers, state_is_tuple=True)
+                self.bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([self.bw_rnn_cell] * nums_layers, state_is_tuple=True)
 
     def __call__(self, input_t, input_ids):
         """
@@ -226,31 +245,28 @@ class BiLSTM(object):
         """
         self.input = input_t
         self.input_ids = input_ids
-        self.lstm_cell_fw = tf.contrib.rnn.AttentionCellWrapper(self.lstm_cell_fw, 5)
-        self.lstm_cell_bw = tf.contrib.rnn.AttentionCellWrapper(self.lstm_cell_bw, 5)
-        # if self.p > 0.:
-        self.lstm_cell_fw = tf.nn.rnn_cell.DropoutWrapper(self.lstm_cell_fw, output_keep_prob=(1 - self.p))
-        self.lstm_cell_bw = tf.nn.rnn_cell.DropoutWrapper(self.lstm_cell_bw, output_keep_prob=(1 - self.p))
 
-        if self.nums_layers > 1:
-            self.lstm_cell_fw = tf.nn.rnn_cell.MultiRNNCell([self.lstm_cell_fw] * self.nums_layers)
-            self.lstm_cell_bw = tf.nn.rnn_cell.MultiRNNCell([self.lstm_cell_bw] * self.nums_layers)
         # 计算每个句子的长度
         self.length = tf.reduce_sum(tf.sign(self.input_ids), axis=1)
         self.length = tf.cast(self.length, dtype=tf.int32)
         # outputs: A tuple (output_fw, output_bw) containing the forward and the backward rnn output
         # output_fw: shape=(batch_size, max_time, cell_fw.output_size)
         outputs, output_states = tf.nn.bidirectional_dynamic_rnn(
-            self.lstm_cell_fw,
-            self.lstm_cell_bw,
+            self.fw_rnn_cell,
+            self.bw_rnn_cell,
             self.input,
             sequence_length=self.length,
             dtype=tf.float32,
             scope=self.scope
         )
-        self.output = tf.concat(values=outputs, axis=2)
-        if self.state:
-            return self.output, output_states
+        if self.concat_output:
+            self.output = tf.concat(values=outputs, axis=2)
+            self.state = tf.concat(values=output_states, axis=2)
+        else:
+            self.output = outputs
+            self.state = output_states
+        if self.output_state:
+            return self.output, self.state
         else:
             return self.output
 
@@ -259,6 +275,7 @@ class TimeDistributed(object):
     """
     Time-distributed wrapper for layers
     """
+
     def __init__(self, layer, name='Time-distributed Wrapper'):
         self.layer = layer
         self.name = name
@@ -279,7 +296,7 @@ class TimeDistributed(object):
             self.out = [self.layer(splits) for splits in self.input]
         else:
             self.out = []
-            pad = self.layer(self.input[0])*0
+            pad = self.layer(self.input[0]) * 0
             masks = tf.reduce_sum(input_ids, axis=0)
             length = len(self.input)
             for i in range(length):
@@ -293,6 +310,7 @@ class Forward(object):
     """
     forward algorithm for the CRF loss
     """
+
     def __init__(self, observations, transitions, nums_tags, length, batch_size, viterbi=True):
         self.observations = observations
         self.transitions = transitions
@@ -321,7 +339,8 @@ class Forward(object):
         b_vec = tf.cast(tf.stack(([small] * self.nums_tags + [0]) * self.batch_size), tf.float32)
         b_vec = tf.reshape(b_vec, [self.batch_size, 1, -1])
         self.observations = tf.concat(axis=1, values=[b_vec, self.observations])
-        self.transitions = tf.reshape(tf.tile(self.transitions, [self.batch_size, 1]), [self.batch_size, self.nums_tags + 1, self.nums_tags + 1])
+        self.transitions = tf.reshape(tf.tile(self.transitions, [self.batch_size, 1]),
+                                      [self.batch_size, self.nums_tags + 1, self.nums_tags + 1])
         self.observations = tf.reshape(self.observations, [-1, self.nums_steps + 1, self.nums_tags + 1, 1])
         self.observations = tf.transpose(self.observations, [1, 0, 2, 3])
         previous = self.observations[0, :, :, :]
@@ -330,7 +349,7 @@ class Forward(object):
         alphas = [previous]
         for t in range(1, self.nums_steps + 1):
             previous = tf.reshape(previous, [-1, self.nums_tags + 1, 1])
-            current =  tf.reshape(self.observations[t,:, :, :], [-1, 1, self.nums_tags + 1])
+            current = tf.reshape(self.observations[t, :, :, :], [-1, 1, self.nums_tags + 1])
             alpha_t = previous + current + self.transitions
             if self.viterbi:
                 max_scores.append(tf.reduce_max(alpha_t, axis=1))
@@ -345,5 +364,3 @@ class Forward(object):
         max_scores = tf.stack(max_scores, axis=1)
         max_scores_pre = tf.stack(max_scores_pre, axis=1)
         return tf.reduce_sum(self.log_sum_exp(last_alphas, axis=1)), max_scores, max_scores_pre
-
-

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import division
 import tensorflow as tf
-from layers import EmbeddingLayer, BiLSTM, HiddenLayer, TimeDistributed, Forward
+from layers import EmbeddingLayer, BiRNN, HiddenLayer, TimeDistributed, Forward
 from time import time
 import losses
 import toolbox
@@ -134,19 +134,6 @@ class Model(object):
         # weights 表示预训练的字向量，可以通过命令行参数设置
         self.emb_layer = EmbeddingLayer(self.nums_chars + 500, emb_dim, weights=emb, name='emb_layer')
 
-        with tf.variable_scope('BiRNN'):
-
-            if gru:
-                fw_rnn_cell = tf.nn.rnn_cell.GRUCell(rnn_dim)
-                bw_rnn_cell = tf.nn.rnn_cell.GRUCell(rnn_dim)
-            else:
-                fw_rnn_cell = tf.nn.rnn_cell.LSTMCell(rnn_dim, state_is_tuple=True)
-                bw_rnn_cell = tf.nn.rnn_cell.LSTMCell(rnn_dim, state_is_tuple=True)
-
-            if rnn_num > 1:
-                fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([fw_rnn_cell] * rnn_num, state_is_tuple=True)
-                bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([bw_rnn_cell] * rnn_num, state_is_tuple=True)
-
         # 隐藏层，输入是前向 RNN 的输出加上 后向 RNN 的输出，所以输入维度为 rnn_dim * 2
         # 输出维度即标签个数
         output_wrapper = TimeDistributed(
@@ -175,8 +162,7 @@ class Model(object):
 
             # rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
             highway_out = self.highway(word_embeddings, name="tag")
-            rnn_out = BiLSTM(rnn_dim, fw_cell=fw_rnn_cell, bw_cell=bw_rnn_cell, p=dr,
-                             name='BiLSTM' + str(bucket), scope='BiRNN')(highway_out, input_sentences)
+            rnn_out = BiRNN(rnn_dim, p=dr, name='BiLSTM' + str(bucket), scope='Tag-BiRNN')(highway_out, input_sentences)
 
             # 应用全连接层，Wx+b 得到最后的输出
             output = output_wrapper(rnn_out)
@@ -189,21 +175,9 @@ class Model(object):
 
             # language model
             lm_rnn_dim = rnn_dim
-            with tf.variable_scope('LM-BiRNN'):
-                if gru:
-                    lm_fw_rnn_cell = tf.nn.rnn_cell.GRUCell(lm_rnn_dim)
-                    lm_bw_rnn_cell = tf.nn.rnn_cell.GRUCell(lm_rnn_dim)
-                else:
-                    lm_fw_rnn_cell = tf.nn.rnn_cell.LSTMCell(lm_rnn_dim, state_is_tuple=True)
-                    lm_bw_rnn_cell = tf.nn.rnn_cell.LSTMCell(lm_rnn_dim, state_is_tuple=True)
-
-                if rnn_num > 1:
-                    lm_fw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([lm_fw_rnn_cell] * rnn_num, state_is_tuple=True)
-                    lm_bw_rnn_cell = tf.nn.rnn_cell.MultiRNNCell([lm_bw_rnn_cell] * rnn_num, state_is_tuple=True)
-            lm_rnn_output = BiLSTM(lm_rnn_dim, fw_cell=lm_fw_rnn_cell,
-                                   bw_cell=lm_bw_rnn_cell, p=dr,
-                                   name='LM-BiLSTM' + str(bucket),
-                                   scope='LM-BiRNN')(self.highway(word_embeddings), input_sentences)
+            lm_rnn_output = BiRNN(lm_rnn_dim, p=dr,
+                                  name='LM-BiLSTM' + str(bucket),
+                                  scope='LM-BiRNN')(self.highway(word_embeddings, name='lm'), input_sentences)
 
             lm_output_wrapper = TimeDistributed(
                 HiddenLayer(lm_rnn_dim * 2, self.nums_chars + 2, activation='linear', name='lm_hidden'),
@@ -536,7 +510,8 @@ class Model(object):
         chars = toolbox.decode_chars(t_x[0], idx2char)
         gold_out = toolbox.generate_output(chars, gold, self.tag_scheme)
 
-        prediction = self.predict(data=t_x, sess=sess, model=self.input_v[0] + self.output[0], index=0, ensemble=ensemble, batch_size=batch_size)
+        prediction = self.predict(data=t_x, sess=sess, model=self.input_v[0] + self.output[0], index=0,
+                                  ensemble=ensemble, batch_size=batch_size)
         prediction = toolbox.decode_tags(prediction, idx2tag, self.tag_scheme)
         prediction_out = toolbox.generate_output(chars, prediction, self.tag_scheme)
 
