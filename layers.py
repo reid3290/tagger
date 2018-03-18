@@ -261,7 +261,7 @@ class BiRNN(object):
         )
         if self.concat_output:
             self.output = tf.concat(values=outputs, axis=2)
-            self.state = tf.concat(values=output_states, axis=2)
+            self.state = tf.concat(values=output_states, axis=1)
         else:
             self.output = outputs
             self.state = output_states

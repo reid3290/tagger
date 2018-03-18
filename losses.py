@@ -75,7 +75,7 @@ def sequence_loss_by_example(logits, targets, weights=None, average_across_times
     return log_perps
 
 
-def crf_loss(y, y_, ly, ly_, transitions, nums_tags, batch_size):
+def crf_loss(y, y_, ly_fw, ly_fw_,ly_bw, ly_bw_, transitions, nums_tags, batch_size):
     """
     计算 CRF 损失函数值
     :param y: 预测值，shape = (batch_size, 句子长度，标签数量)，即每个句子中各个字符对应的标签概率
@@ -116,21 +116,41 @@ def crf_loss(y, y_, ly, ly_, transitions, nums_tags, batch_size):
     target_path_score = tf.reduce_sum(point_score) + tf.reduce_sum(trans_score)
     total_path_score, _, _ = Forward(tag_scores, transitions, nums_tags, lengths, batch_size)()
     tagging_loss = - (target_path_score - total_path_score)
-    lm_loss = tf.reduce_sum(sparse_cross_entropy(ly, ly_) * masks)
+
+    lm_fw_loss = tf.reduce_sum(sparse_cross_entropy(ly_fw, ly_fw_) * masks)
+    lm_bw_loss = tf.reduce_sum(sparse_cross_entropy(ly_bw, ly_bw_) * masks)
 
     #return tagging_loss, tf.zeros_like(lm_loss)
-    return tagging_loss, lm_loss
+    return tagging_loss, lm_fw_loss + lm_bw_loss
 
 
-def loss_wrapper(y, y_, lm_y, lm_y_, loss_function, transitions=None, nums_tags=None, batch_size=None, weights=None, average_cross_steps=True):
+def loss_wrapper(y, y_, lm_fw_y, lm_fw_y_,
+                 lm_bw_y, lm_bw_y_,
+                 loss_function, transitions=None, nums_tags=None, batch_size=None, weights=None,
+                 average_cross_steps=True):
+    """
+
+    :param y:
+    :param y_:
+    :param lm_y: lm output
+    :param lm_y_: lm ground truth
+    :param loss_function:
+    :param transitions:
+    :param nums_tags:
+    :param batch_size:
+    :param weights:
+    :param average_cross_steps:
+    :return:
+    """
     assert len(y) == len(y_)
     total_tagging_loss = []
     total_lm_loss = []
     total_loss = []
     if loss_function is crf_loss:
         assert len(y) == len(transitions) and len(transitions) == len(nums_tags) and batch_size is not None
-        for sy, sy_, ly, ly_, transition, tags in zip(y, y_, lm_y, lm_y_, transitions, nums_tags):
-            tagging_loss, lm_loss = loss_function(sy, sy_, ly, ly_, transition, tags, batch_size)
+        for sy, sy_, ly_fw, ly_fw_, ly_bw, ly_bw_, transition, tags in \
+                zip(y, y_, lm_fw_y, lm_fw_y_, lm_bw_y, lm_bw_y_, transitions, nums_tags):
+            tagging_loss, lm_loss = loss_function(sy, sy_, ly_fw, ly_fw_, ly_bw, ly_bw_, transition, tags, batch_size)
             total_tagging_loss.append(tagging_loss)
             total_lm_loss.append(lm_loss)
     elif loss_function is cross_entropy:

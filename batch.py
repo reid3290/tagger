@@ -30,12 +30,14 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
     if debug_variable is not None:
         session = tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False))
         np.set_printoptions(threshold=10000)
-    # len(data)=5，表示一个句子的字符本身、偏旁部首、2gram、3gram、对应标签
-    lm_targets = []
+    # len(data)=5，表示一个句子的字符本身、对应标签
+    lm_fw_target = []
+    lm_bw_target = []
     for sentence in data[0]:
-        lm_target = np.append(sentence[1:], 0)
-        lm_targets.append(lm_target)
-    data.append(lm_targets)
+        lm_fw_target.append(np.append(sentence[1:], 0))
+        lm_bw_target.append(np.append([0],sentence[:-1]))
+    data.append(lm_fw_target)
+    data.append(lm_bw_target)
     assert len(data) == len(placeholders)
     num_items = len(data)
     samples = zip(*data)

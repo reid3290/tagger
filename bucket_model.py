@@ -55,8 +55,10 @@ class Model(object):
         self.output_w = []
         self.output_w_ = []
 
-        self.lm_predictions = []
-        self.lm_groundtruthes = []
+        self.lm_fw_predictions = []
+        self.lm_bw_predictions = []
+        self.lm_fw_groundtruthes = []
+        self.lm_bw_groundtruthes = []
 
         self.summaries = []
         # 使用 viterbi 解码
@@ -175,23 +177,28 @@ class Model(object):
 
             # language model
             lm_rnn_dim = rnn_dim
-            lm_rnn_output = BiRNN(lm_rnn_dim, p=dr,
+            lm_output_fw, lm_output_bw = BiRNN(lm_rnn_dim, p=dr, concat_output=False,
                                   name='LM-BiLSTM' + str(bucket),
                                   scope='LM-BiRNN')(self.highway(word_embeddings, name='lm'), input_sentences)
+            lm_fw_wrapper = TimeDistributed(
+                HiddenLayer(lm_rnn_dim, self.nums_chars + 2, activation='linear', name='lm_fw_hidden'),
+                name='lm_fw_wrapper')
+            lm_bw_wrapper = TimeDistributed(
+                HiddenLayer(lm_rnn_dim, self.nums_chars + 2, activation='linear', name='lm_bw_hidden'),
+                name='lm_bw_wrapper')
 
-            lm_output_wrapper = TimeDistributed(
-                HiddenLayer(lm_rnn_dim * 2, self.nums_chars + 2, activation='linear', name='lm_hidden'),
-                name='lm_wrapper')
-            lm_final_output = lm_output_wrapper(lm_rnn_output)
-            self.lm_predictions.append([lm_final_output])
-            self.lm_groundtruthes.append([tf.placeholder(tf.int32, [None, bucket], name='lm_targets' + str(bucket))])
+            self.lm_fw_predictions.append([lm_fw_wrapper(lm_output_fw)])
+            self.lm_bw_predictions.append([lm_bw_wrapper(lm_output_bw)])
+            self.lm_fw_groundtruthes.append([tf.placeholder(tf.int32, [None, bucket], name='lm_fw_targets' + str(bucket))])
+            self.lm_bw_groundtruthes.append([tf.placeholder(tf.int32, [None, bucket], name='lm_bw_targets' + str(bucket))])
 
             print 'Bucket %d, %f seconds' % (idx + 1, time() - t1)
 
         assert \
             len(self.input_v) == len(self.output) and \
             len(self.output) == len(self.output_) and \
-            len(self.lm_predictions) == len(self.lm_groundtruthes) and \
+            len(self.lm_fw_predictions) == len(self.lm_fw_groundtruthes) and \
+            len(self.lm_bw_predictions) == len(self.lm_bw_groundtruthes) and \
             len(self.output) == len(self.counts)
 
         self.params = tf.trainable_variables()
@@ -218,8 +225,10 @@ class Model(object):
 
             for i in range(len(self.input_v)):
                 # 根据第 i 个 bucket 的输出和 ground truth，用 CRF 损失函数，计算损失函数值
-                tagging_loss, lm_loss = losses.loss_wrapper(self.output[i], self.output_[i], self.lm_predictions[i],
-                                                            self.lm_groundtruthes[i], loss_function,
+                tagging_loss, lm_loss = losses.loss_wrapper(self.output[i], self.output_[i],
+                                                            self.lm_fw_predictions[i],self.lm_fw_groundtruthes[i],
+                                                            self.lm_bw_predictions[i], self.lm_bw_groundtruthes[i],
+                                                            loss_function,
                                                             transitions=self.transition_char, nums_tags=self.nums_tags,
                                                             batch_size=self.real_batches[i])
                 tagging_loss_summary = tf.summary.scalar('tagging loss %s' % i, tf.reduce_mean(tagging_loss))
@@ -384,7 +393,7 @@ class Model(object):
                 idx = self.bucket_dit[c_len]
                 real_batch_size = self.real_batches[idx]
                 # 当前 bucket 的模型的输入和输出（注意每个 bucket 都有一个单独的模型）
-                model_placeholders = self.input_v[idx] + self.output_[idx] + self.lm_groundtruthes[idx]
+                model_placeholders = self.input_v[idx] + self.output_[idx] + self.lm_fw_groundtruthes[idx] + self.lm_bw_groundtruthes[idx]
                 # sess[0] 是 main_sess, sess[1] 是 decode_sess(如果使用 CRF 的话)
                 # 训练当前的 bucket，这个函数里面才真正地为模型填充了数据并运行(以 real_batch_size 为单位，将 bucket 中的句子依次喂给模型)
                 # 被 sess.run 的是 config=self.train_step[idx]，train_step[idx] 就会触发 BP 更新参数了
