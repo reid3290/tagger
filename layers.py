@@ -220,9 +220,11 @@ class BiRNN(object):
         self.gru = gru
         with tf.variable_scope(scope):
             if gru:
+                print "BiRNN %s uses GUR" % name
                 fw_rnn_cell = tf.nn.rnn_cell.GRUCell(cell_dim)
                 bw_rnn_cell = tf.nn.rnn_cell.GRUCell(cell_dim)
             else:
+                print "BiRNN %s uses LSTM" % name
                 fw_rnn_cell = tf.nn.rnn_cell.LSTMCell(cell_dim, state_is_tuple=True)
                 bw_rnn_cell = tf.nn.rnn_cell.LSTMCell(cell_dim, state_is_tuple=True)
 

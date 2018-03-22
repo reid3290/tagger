@@ -164,7 +164,8 @@ class Model(object):
 
             # rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
             highway_out = self.highway(word_embeddings, name="tag")
-            rnn_out = BiRNN(rnn_dim, p=dr, name='BiLSTM' + str(bucket), scope='Tag-BiRNN')(highway_out, input_sentences)
+            rnn_out = BiRNN(rnn_dim, p=dr, gru=gru,
+                            name='BiLSTM' + str(bucket), scope='Tag-BiRNN')(highway_out, input_sentences)
 
             # 应用全连接层，Wx+b 得到最后的输出
             output = output_wrapper(rnn_out)
@@ -177,9 +178,8 @@ class Model(object):
 
             # language model
             lm_rnn_dim = rnn_dim
-            lm_output_fw, lm_output_bw = BiRNN(lm_rnn_dim, p=dr, concat_output=False,
-                                  name='LM-BiLSTM' + str(bucket),
-                                  scope='LM-BiRNN')(self.highway(word_embeddings, name='lm'), input_sentences)
+            lm_output_fw, lm_output_bw = BiRNN(lm_rnn_dim, p=dr, concat_output=False, gru=gru,
+                                               name='LM-BiLSTM' + str(bucket),scope='LM-BiRNN')(self.highway(word_embeddings, name='lm'), input_sentences)
             lm_fw_wrapper = TimeDistributed(
                 HiddenLayer(lm_rnn_dim, self.nums_chars + 2, activation='linear', name='lm_fw_hidden'),
                 name='lm_fw_wrapper')
