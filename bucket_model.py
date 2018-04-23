@@ -15,8 +15,8 @@ from my.tensorflow.nn import highway_network
 
 
 class Model(object):
-    def __init__(self, nums_chars, nums_tags, buckets_char, counts=None,
-                 batch_size=10, tag_scheme='BIES', crf=1, metric='F1-score'):
+    def __init__(self, nums_chars, nums_tags, buckets_char, counts=None, batch_size=10, tag_scheme='BIES', crf=1,
+                 metric='F1-score', co_train=False, highway=False, highway_layers=1, lambda0=0):
         # 字符种类数目
         self.nums_chars = nums_chars
         # 标签种类数目，例如[18]，至于为什么要用数组多此一举不清楚
@@ -55,10 +55,16 @@ class Model(object):
         self.output_w = []
         self.output_w_ = []
 
-        self.lm_fw_predictions = []
-        self.lm_bw_predictions = []
-        self.lm_fw_groundtruthes = []
-        self.lm_bw_groundtruthes = []
+        self.co_train = co_train
+        self.highway = highway
+        self.highway_layers = highway_layers
+
+        if self.co_train:
+            self.lm_fw_predictions = []
+            self.lm_bw_predictions = []
+            self.lm_fw_groundtruthes = []
+            self.lm_bw_groundtruthes = []
+            self.lambda0 = lambda0
 
         self.summaries = []
         # 使用 viterbi 解码
@@ -69,8 +75,6 @@ class Model(object):
                     # 标签转移矩阵，为什么要额外加一呢？
                     tf.get_variable('transitions_char' + str(i), [self.nums_tags[i] + 1, self.nums_tags[i] + 1])
                 )
-
-        self.all_metrics = None
 
         self.all_metrics = ['Precision', 'Recall', 'F1-score', 'True-Negative-Rate', 'Boundary-F1-score']
 
@@ -83,13 +87,8 @@ class Model(object):
         self.real_batches = toolbox.get_real_batch(self.counts, self.batch_size)
         self.losses = []
 
-    def highway(self, X, name=""):
-        return highway_network(X, 2, True, is_train=True, scope=name)
-        # return highway_network_modern.highway(X, scope=name, use_batch_timesteps=True)
-
     def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, emb=None):
         """
-
         :param trained_model:
         :param scope:
         :param emb_dim:
@@ -161,11 +160,13 @@ class Model(object):
             # 根据 one-hot 向量查找对应的字向量
             # word_out: shape=(batch_size, 句子长度，字向量维度（64）)
             word_embeddings = self.emb_layer(input_sentences)
-
+            tag_rnn_in = word_embeddings
+            if self.co_train:
+                if self.highway and self.highway > 0:
+                    tag_rnn_in = highway_network(tag_rnn_in, self.highway_layers, True, is_train=True, scope="tag")
             # rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
-            highway_out = self.highway(word_embeddings, name="tag")
             rnn_out = BiRNN(rnn_dim, p=dr, gru=gru,
-                            name='BiLSTM' + str(bucket), scope='Tag-BiRNN')(highway_out, input_sentences)
+                            name='BiLSTM' + str(bucket), scope='Tag-BiRNN')(tag_rnn_in, input_sentences)
 
             # 应用全连接层，Wx+b 得到最后的输出
             output = output_wrapper(rnn_out)
@@ -176,29 +177,34 @@ class Model(object):
 
             self.bucket_dit[bucket] = idx
 
-            # language model
-            lm_rnn_dim = rnn_dim
-            lm_output_fw, lm_output_bw = BiRNN(lm_rnn_dim, p=dr, concat_output=False, gru=gru,
-                                               name='LM-BiLSTM' + str(bucket),scope='LM-BiRNN')(self.highway(word_embeddings, name='lm'), input_sentences)
-            lm_fw_wrapper = TimeDistributed(
-                HiddenLayer(lm_rnn_dim, self.nums_chars + 2, activation='linear', name='lm_fw_hidden'),
-                name='lm_fw_wrapper')
-            lm_bw_wrapper = TimeDistributed(
-                HiddenLayer(lm_rnn_dim, self.nums_chars + 2, activation='linear', name='lm_bw_hidden'),
-                name='lm_bw_wrapper')
+            if self.co_train:
+                # language model
+                lm_rnn_dim = rnn_dim
+                lm_rnn_in = word_embeddings
+                if self.highway and self.highway_layers > 0:
+                    lm_rnn_in = highway_network(lm_rnn_in, self.highway_layers, True, is_train=True, scope="lm")
+                lm_output_fw, lm_output_bw = BiRNN(lm_rnn_dim, p=dr, concat_output=False, gru=gru,
+                                                   name='LM-BiLSTM' + str(bucket), scope='LM-BiRNN')(
+                    lm_rnn_in, input_sentences)
+                lm_fw_wrapper = TimeDistributed(
+                    HiddenLayer(lm_rnn_dim, self.nums_chars + 2, activation='linear', name='lm_fw_hidden'),
+                    name='lm_fw_wrapper')
+                lm_bw_wrapper = TimeDistributed(
+                    HiddenLayer(lm_rnn_dim, self.nums_chars + 2, activation='linear', name='lm_bw_hidden'),
+                    name='lm_bw_wrapper')
 
-            self.lm_fw_predictions.append([lm_fw_wrapper(lm_output_fw)])
-            self.lm_bw_predictions.append([lm_bw_wrapper(lm_output_bw)])
-            self.lm_fw_groundtruthes.append([tf.placeholder(tf.int32, [None, bucket], name='lm_fw_targets' + str(bucket))])
-            self.lm_bw_groundtruthes.append([tf.placeholder(tf.int32, [None, bucket], name='lm_bw_targets' + str(bucket))])
+                self.lm_fw_predictions.append([lm_fw_wrapper(lm_output_fw)])
+                self.lm_bw_predictions.append([lm_bw_wrapper(lm_output_bw)])
+                self.lm_fw_groundtruthes.append(
+                    [tf.placeholder(tf.int32, [None, bucket], name='lm_fw_targets' + str(bucket))])
+                self.lm_bw_groundtruthes.append(
+                    [tf.placeholder(tf.int32, [None, bucket], name='lm_bw_targets' + str(bucket))])
 
             print 'Bucket %d, %f seconds' % (idx + 1, time() - t1)
 
         assert \
             len(self.input_v) == len(self.output) and \
             len(self.output) == len(self.output_) and \
-            len(self.lm_fw_predictions) == len(self.lm_fw_groundtruthes) and \
-            len(self.lm_bw_predictions) == len(self.lm_bw_groundtruthes) and \
             len(self.output) == len(self.counts)
 
         self.params = tf.trainable_variables()
@@ -220,23 +226,36 @@ class Model(object):
         print 'Training preparation...'
 
         print 'Defining loss...'
-        if self.crf > 0:
-            loss_function = losses.crf_loss
 
+        if self.crf > 0:
             for i in range(len(self.input_v)):
                 # 根据第 i 个 bucket 的输出和 ground truth，用 CRF 损失函数，计算损失函数值
-                tagging_loss, lm_loss = losses.loss_wrapper(self.output[i], self.output_[i],
-                                                            self.lm_fw_predictions[i],self.lm_fw_groundtruthes[i],
-                                                            self.lm_bw_predictions[i], self.lm_bw_groundtruthes[i],
-                                                            loss_function,
-                                                            transitions=self.transition_char, nums_tags=self.nums_tags,
-                                                            batch_size=self.real_batches[i])
+                tagging_loss = losses.loss_wrapper(self.output[i], self.output_[i],
+                                                   losses.crf_loss,
+                                                   transitions=self.transition_char, nums_tags=self.nums_tags,
+                                                   batch_size=self.real_batches[i])
                 tagging_loss_summary = tf.summary.scalar('tagging loss %s' % i, tf.reduce_mean(tagging_loss))
-                lm_loss_summary = tf.summary.scalar('language model loss %s' % i, tf.reduce_mean(lm_loss))
-                self.losses.append(tagging_loss + lm_loss)
-                self.summaries.append([tagging_loss_summary, lm_loss_summary])
+
+                if self.co_train:
+                    lm_loss = []
+                    masks = tf.cast(tf.sign(self.output_[i]), dtype=tf.float32)
+                    for lm_fw_y, lm_fw_y_, lm_bw_y, lm_bw_y_ in zip(self.lm_fw_predictions[i],
+                                                                    self.lm_fw_groundtruthes[i],
+                                                                    self.lm_bw_predictions[i],
+                                                                    self.lm_bw_groundtruthes[i]):
+                        lm_fw_loss = tf.reduce_sum(losses.sparse_cross_entropy(lm_fw_y, lm_fw_y_) * masks)
+                        lm_bw_loss = tf.reduce_sum(losses.sparse_cross_entropy(lm_bw_y, lm_bw_y_) * masks)
+                        lm_loss.append(lm_fw_loss + lm_bw_loss)
+                    lm_loss = tf.stack(lm_loss)
+                    lm_loss_summary = tf.summary.scalar('language model loss %s' % i, tf.reduce_mean(lm_loss))
+                    self.losses.append(tagging_loss + self.lambda0 * lm_loss)
+                    self.summaries.append([tagging_loss_summary, lm_loss_summary])
+                else:
+                    self.losses.append(tagging_loss)
+                    self.summaries.append([tagging_loss_summary])
 
         else:
+            # todo
             loss_function = losses.sparse_cross_entropy
             for output, output_ in zip(self.output, self.output_):
                 bucket_loss = losses.loss_wrapper(output, output_, loss_function)
@@ -393,7 +412,9 @@ class Model(object):
                 idx = self.bucket_dit[c_len]
                 real_batch_size = self.real_batches[idx]
                 # 当前 bucket 的模型的输入和输出（注意每个 bucket 都有一个单独的模型）
-                model_placeholders = self.input_v[idx] + self.output_[idx] + self.lm_fw_groundtruthes[idx] + self.lm_bw_groundtruthes[idx]
+                model_placeholders = self.input_v[idx] + self.output_[idx]
+                if self.co_train:
+                    model_placeholders += self.lm_fw_groundtruthes[idx] + self.lm_bw_groundtruthes[idx]
                 # sess[0] 是 main_sess, sess[1] 是 decode_sess(如果使用 CRF 的话)
                 # 训练当前的 bucket，这个函数里面才真正地为模型填充了数据并运行(以 real_batch_size 为单位，将 bucket 中的句子依次喂给模型)
                 # 被 sess.run 的是 config=self.train_step[idx]，train_step[idx] 就会触发 BP 更新参数了

@@ -31,13 +31,14 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
         session = tf.Session(config=tf.ConfigProto(allow_soft_placement=True, log_device_placement=False))
         np.set_printoptions(threshold=10000)
     # len(data)=5，表示一个句子的字符本身、对应标签
-    lm_fw_target = []
-    lm_bw_target = []
-    for sentence in data[0]:
-        lm_fw_target.append(np.append(sentence[1:], 0))
-        lm_bw_target.append(np.append([0],sentence[:-1]))
-    data.append(lm_fw_target)
-    data.append(lm_bw_target)
+    if len(data) != len(placeholders):
+        lm_fw_target = []
+        lm_bw_target = []
+        for sentence in data[0]:
+            lm_fw_target.append(np.append(sentence[1:], 0))
+            lm_bw_target.append(np.append([0],sentence[:-1]))
+        data.append(lm_fw_target)
+        data.append(lm_bw_target)
     assert len(data) == len(placeholders)
     num_items = len(data)
     samples = zip(*data)
@@ -86,8 +87,8 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
                 log_step = start_idx + len(samples)*epoch_index
                 if verbose:
                     print "log step: %d" % log_step
-                log_writer.add_summary(summary[0], log_step)
-                log_writer.add_summary(summary[1], log_step)
+                for item in summary:
+                    log_writer.add_summary(item, log_step)
             else:
                 _, loss_value = sess.run([train_step, loss], feed_dict=feed_dict)
         start_idx += batch_size

@@ -9,7 +9,6 @@ from time import time
 import cPickle as pickle
 import codecs
 
-
 parser = argparse.ArgumentParser(description='A tagger for joint Chinese segmentation and POS tagging.')
 parser.add_argument('action', default='tag', choices=['train', 'test', 'tag'], help='train, test or tag')
 parser.add_argument('-p', '--path', default=None, help='Path of the workstation')
@@ -59,6 +58,12 @@ parser.add_argument('-tl', '--tag_large', default=False, help='Tag (very) large 
 parser.add_argument('-debug', '--debug', default=False, help='Print debug information', action='store_true')
 
 parser.add_argument('-ls', '--large_size', default=200000, type=int, help='Tag (very) large file')
+
+parser.add_argument('--co_train', action='store_true', default=False, help='cotrain language model')
+parser.add_argument('--lambda0', type=float, default=1, help='language model loss weight')
+parser.add_argument('--patience', type=int, default=15, help='patience for early stop')
+parser.add_argument('--high_way', action='store_true', help='use highway layers')
+parser.add_argument('--highway_layers', type=int, default=1, help='number of highway layers')
 
 args = parser.parse_args()
 
@@ -151,7 +156,11 @@ if args.action == 'train':
                           nums_tags=nums_tags, buckets_char=b_buckets, counts=b_counts,
                           tag_scheme=args.tag_scheme,
                           crf=args.crf,
-                          batch_size=args.train_batch, metric=args.op_metric)
+                          batch_size=args.train_batch, metric=args.op_metric,
+                          co_train=args.co_train,
+                          lambda0=args.lambda0,
+                          highway=args.high_way,
+                          highway_layers=args.highway_layers)
             # 构建 graph，即字符输入=>字向量=>BiLSTM=>全连接层的整个模型图
             model.main_graph(trained_model=path + '/' + model_file + '_model', scope=scope, emb_dim=emb_dim,
                              gru=args.gru, rnn_dim=args.rnn_cell_dimension, rnn_num=args.rnn_layer_number,
@@ -189,7 +198,7 @@ if args.action == 'train':
         model.train(t_x=b_train_x, t_y=b_train_y, v_x=b_dev_x, v_y=b_dev_y, idx2tag=idx2tag, idx2char=idx2char,
                     sess=sess, epochs=args.epochs, trained_model=path + '/' + model_file + '_weights',
                     lr=args.learning_rate, decay=args.decay_rate, tag_num=len(tags))
-        print 'Done. Time consumed: %f hours' % (int(time() - t)/60.0/60.0)
+        print 'Done. Time consumed: %f hours' % (int(time() - t) / 60.0 / 60.0)
 
 else:
 
@@ -202,11 +211,13 @@ else:
     emb_path = args.embeddings
 
     if args.ensemble:
-        if not os.path.isfile(path + '/' + model_file + '_1_model') or not os.path.isfile(path + '/' + model_file + '_1_weights.index'):
+        if not os.path.isfile(path + '/' + model_file + '_1_model') or not os.path.isfile(
+                                        path + '/' + model_file + '_1_weights.index'):
             raise Exception('Not any model file or weights file under the name of ' + model_file + '.')
         fin = open(path + '/' + model_file + '_1_model', 'rb')
     else:
-        if not os.path.isfile(path + '/' + model_file + '_model') or not os.path.isfile(path + '/' + model_file + '_weights.index'):
+        if not os.path.isfile(path + '/' + model_file + '_model') or not os.path.isfile(
+                                        path + '/' + model_file + '_weights.index'):
             raise Exception('No model file or weights file under the name of ' + model_file + '.')
         fin = open(path + '/' + model_file + '_model', 'rb')
 
@@ -256,7 +267,6 @@ else:
         valid_chars = None
 
         if args.embeddings is not None:
-
             valid_chars = toolbox.get_valid_chars(new_chars, args.embeddings)
 
         char2idx, idx2char, unk_char2idx = toolbox.update_char_dict(char2idx, new_chars, valid_chars)
@@ -288,7 +298,6 @@ else:
         valid_chars = None
 
         if args.embeddings is not None:
-
             valid_chars = toolbox.get_valid_chars(new_chars, args.embeddings)
 
         char2idx, idx2char, unk_char2idx = toolbox.update_char_dict(char2idx, new_chars, valid_chars)
@@ -304,7 +313,6 @@ else:
 
         print 'Longest sentence is %d. ' % max_step
 
-
         if not args.tag_large:
             for k in range(len(raw_x)):
                 raw_x[k] = toolbox.pad_zeros(raw_x[k], max_step)
@@ -319,7 +327,7 @@ else:
         with tf.variable_scope("tagger") as scope:
             if args.action == 'test' or (args.action == 'tag' and not args.tag_large):
                 model = Model(nums_chars=nums_chars, nums_tags=nums_tags, buckets_char=[max_step], counts=[200],
-                              tag_scheme=tag_scheme, crf=crf, batch_size=args.tag_batch)
+                              batch_size=args.tag_batch, tag_scheme=tag_scheme, crf=crf)
             else:
                 bt_chars = []
                 bt_len = args.bucket_size
@@ -331,7 +339,7 @@ else:
                     bt_chars.append(max_step)
                 bt_counts = [200] * len(bt_chars)
                 model = Model(nums_chars=nums_chars, nums_tags=nums_tags, buckets_char=bt_chars, counts=bt_counts,
-                              tag_scheme=tag_scheme, crf=crf, batch_size=args.tag_batch)
+                              batch_size=args.tag_batch, tag_scheme=tag_scheme, crf=crf)
             model.main_graph(trained_model=None, scope=scope, emb_dim=emb_dim, gru=gru, rnn_dim=rnn_dim,
                              rnn_num=rnn_num, drop_out=drop_out)
         model.define_updates(new_chars=new_chars, emb_path=emb_path, char2idx=char2idx)
@@ -377,11 +385,14 @@ else:
             model.run_updates(main_sess, weight_path + '_weights')
 
         if args.action == 'test':
-            model.test(sess=sess, t_x=test_x, t_y=test_y, idx2tag=idx2tag, idx2char=idx2char, outpath=args.output_path, ensemble=args.ensemble, batch_size=args.test_batch, tag_num=len(tags))
+            model.test(sess=sess, t_x=test_x, t_y=test_y, idx2tag=idx2tag, idx2char=idx2char, outpath=args.output_path,
+                       ensemble=args.ensemble, batch_size=args.test_batch, tag_num=len(tags))
 
         elif args.action == 'tag':
             if not args.tag_large:
-                model.tag(sess=sess, r_x=raw_x, idx2tag=idx2tag, idx2char=idx2char, char2idx=unk_char2idx, outpath=args.output_path, ensemble=args.ensemble, batch_size=args.tag_batch, large_file=args.tag_large)
+                model.tag(sess=sess, r_x=raw_x, idx2tag=idx2tag, idx2char=idx2char, char2idx=unk_char2idx,
+                          outpath=args.output_path, ensemble=args.ensemble, batch_size=args.tag_batch,
+                          large_file=args.tag_large)
             else:
                 def tag_large_raw_file(l_raw_file, output_path, l_max_step):
                     l_writer = codecs.open(output_path, 'w', encoding='utf-8')
@@ -403,7 +414,9 @@ else:
                                 for k in range(len(raw_x)):
                                     raw_x[k] = toolbox.pad_zeros(raw_x[k], l_max_step)
 
-                                out = model.tag(sess=sess, r_x=raw_x, idx2tag=idx2tag, idx2char=idx2char, char2idx=unk_char2idx, outpath=args.output_path, ensemble=args.ensemble, batch_size=args.tag_batch, large_file=args.tag_large)
+                                out = model.tag(sess=sess, r_x=raw_x, idx2tag=idx2tag, idx2char=idx2char,
+                                                char2idx=unk_char2idx, outpath=args.output_path, ensemble=args.ensemble,
+                                                batch_size=args.tag_batch, large_file=args.tag_large)
 
                                 for l_out in out:
                                     l_writer.write(l_out + '\n')
@@ -420,7 +433,8 @@ else:
                             for k in range(len(raw_x)):
                                 raw_x[k] = toolbox.pad_zeros(raw_x[k], l_max_step)
 
-                            out = model.tag(sess=sess, r_x=raw_x, idx2tag=idx2tag, idx2char=idx2char, char2idx=unk_char2idx,
+                            out = model.tag(sess=sess, r_x=raw_x, idx2tag=idx2tag, idx2char=idx2char,
+                                            char2idx=unk_char2idx,
                                             outpath=args.output_path, ensemble=args.ensemble, batch_size=args.tag_batch,
                                             large_file=args.tag_large)
 
@@ -429,11 +443,13 @@ else:
 
                     l_writer.close()
 
+
                 bt_num = (min(300, max_step) - 1) / args.bucket_size + 1
 
                 for i in range(bt_num):
                     print 'Tagging sentences in bucket %d: ' % (i + 1)
-                    tag_large_raw_file(raw_file + '_' + str(i), args.output_path + '_' + str(i), (i + 1) * args.bucket_size)
+                    tag_large_raw_file(raw_file + '_' + str(i), args.output_path + '_' + str(i),
+                                       (i + 1) * args.bucket_size)
 
                 if max_step > 300:
                     print 'Tagging sentences in the last bucket: '
