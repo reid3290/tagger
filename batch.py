@@ -94,18 +94,18 @@ def train(sess, placeholders, batch_size, train_step, loss, lr, lrv, data, debug
         start_idx += batch_size
 
 
-def predict(sess, model, data, dr=None, transitions=None, crf=True, decode_sess=None, scores=None, decode_holders=None,
+def predict(sess, placeholders, data, dr=None, transitions=None, crf=True, decode_sess=None, scores=None, decode_holders=None,
             argmax=True, batch_size=100, ensemble=False, verbose=False):
     en_num = None
     if ensemble:
         en_num = len(sess)
     # 输入向量是4个，字符、偏旁、2gram、3gram
     num_items = len(data)
-    input_v = model[:num_items]
+    input_v = placeholders[:num_items]
     if dr is not None:
         input_v.append(dr)
     # 预测向量1个
-    predictions = model[num_items:]
+    predictions = placeholders[num_items:]
     # output = [[]]
     output = [[] for _ in range(len(predictions))]
     samples = zip(*data)

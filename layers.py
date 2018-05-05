@@ -57,7 +57,7 @@ class HiddenLayer(object):
         self.linear = tf.matmul(self.input, self.weights)
         if self.is_bias:
             self.linear += self.bias
-        if self.activation == None:
+        if self.activation is None:
             self.output = self.linear
         else:
             self.output = self.activation(self.linear)

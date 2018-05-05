@@ -9,7 +9,6 @@ import re
 import pygame
 import copy
 
-
 from evaluation import score, score_boundaries
 
 sys.stdout = codecs.getwriter('utf8')(sys.stdout)
@@ -19,7 +18,7 @@ sys.stdout = codecs.getwriter('utf8')(sys.stdout)
 # 只统计了有哪些 ngram，没有统计对应的出现次数
 def get_ngrams(raw, gram):
     gram_set = set()
-    li = gram/2
+    li = gram / 2
     ri = gram - li - 1
     p = '<PAD>'
     for line in raw:
@@ -29,9 +28,9 @@ def get_ngrams(raw, gram):
             else:
                 lp = line[i - li:i]
             if i + ri + 1 > len(line):
-                rp = line[i:] + p*(i + ri + 1 - len(line))
+                rp = line[i:] + p * (i + ri + 1 - len(line))
             else:
-                rp = line[i:i+ri+1]
+                rp = line[i:i + ri + 1]
             ch = lp + rp
             gram_set.add(ch)
     return gram_set
@@ -42,19 +41,25 @@ def get_vocab_tag(path, filelist, ngram=1):
     out_char = codecs.open(path + '/chars.txt', 'w', encoding='utf-8')
     out_tag = codecs.open(path + '/tags.txt', 'w', encoding='utf-8')
     char_set = set()
+    char_count = {}
+    total_char_count = 0
     tag_set = {}
-    raw = [] # 每一行对应开发集或测试集中的一行，但是是去掉词性标签和空格的原始文本，用于统计 ngram 
+    raw = []  # 每一行对应开发集或测试集中的一行，但是是去掉词性标签和空格的原始文本，用于统计 ngram
     for file_name in filelist:
         for line in codecs.open(path + '/' + file_name, 'rb', encoding='utf-8'):
             line = line.strip()
             raw_l = ''
-            sets = line.split(' ') # 训练集和开发集中词和词之间是用空格分开的
+            sets = line.split(' ')  # 训练集和开发集中词和词之间是用空格分开的
             if len(sets) > 0:
                 for seg in sets:
-                    spos = seg.split('_') # 词语和其词性标签之间是用 _ 连接的
+                    spos = seg.split('_')  # 词语和其词性标签之间是用 _ 连接的
                     if len(spos) == 2:
                         for ch in spos[0]:
                             char_set.add(ch)
+                            if ch not in char_count:
+                                char_count[ch] = 0
+                            char_count[ch] += 1
+                            total_char_count += 1
                             raw_l += ch
                         # 记录词性标签及其对应的最长的词的长度
                         if spos[1] in tag_set:
@@ -76,8 +81,8 @@ def get_vocab_tag(path, filelist, ngram=1):
             for g in grams:
                 out_gram.write(g + '\n')
             out_gram.close()
-    for item in char_set:
-        out_char.write(item + '\n')
+    for ch in char_set:
+        out_char.write("%s %f\n" % (ch, char_count[ch] / float(total_char_count)))
     out_char.close()
     for k, v in tag_set.items():
         out_tag.write(k + ' ' + str(v) + '\n')
@@ -85,16 +90,16 @@ def get_vocab_tag(path, filelist, ngram=1):
 
 
 def read_vocab_tag(path, ngrams=1):
-    char_set = set()
+    chars = []
     tag_set = {}
     ngram_set = None
     for line in codecs.open(path + '/chars.txt', 'rb', encoding='utf-8'):
-        char_set.add(line.strip())
+        chars.append(line.strip().split())
     for line in codecs.open(path + '/tags.txt', 'rb', encoding='utf-8'):
         line = line.strip()
         sp = line.split(' ')
         tag_set[sp[0]] = int(sp[1])
-    char_set = list(char_set)
+
     if ngrams > 1:
         ngram_set = []
         for i in range(2, ngrams + 1):
@@ -103,7 +108,7 @@ def read_vocab_tag(path, ngrams=1):
                 line = line.strip()
                 ng_set.add(line)
             ngram_set.append(ng_set)
-    return char_set, tag_set, ngram_set
+    return chars, tag_set, ngram_set
 
 
 def get_sample_embedding(path, emb, chars, default='unk'):
@@ -120,7 +125,7 @@ def get_sample_embedding(path, emb, chars, default='unk'):
         for emb in emb_dic['<P>']:
             p_line += ' ' + unicode(emb)
     else:
-        rand_emb = np.random.uniform(-math.sqrt(float(3)/emb_dim), math.sqrt(float(3)/ emb_dim), emb_dim)
+        rand_emb = np.random.uniform(-math.sqrt(float(3) / emb_dim), math.sqrt(float(3) / emb_dim), emb_dim)
         for emb in rand_emb:
             p_line += ' ' + unicode(emb)
     fout.write(p_line + '\n')
@@ -228,7 +233,7 @@ def get_chars_pixels(path, chars, font, pt_size, utf8=True):
         ch_ary = np.pad(ch_ary, ((pt_size - ch_ary.shape[0], 0), (0, 0)), 'constant', constant_values=0)
     ch_ary = ch_ary.flatten()
     for n in ch_ary:
-        p_line += ' ' + unicode(float(n)/255)
+        p_line += ' ' + unicode(float(n) / 255)
     fout.write(p_line + '\n')
 
     p_line = '<FW>'
@@ -263,14 +268,14 @@ def get_chars_pixels(path, chars, font, pt_size, utf8=True):
         ch_ary = ch_ary.flatten()
         pix_dic[ch] = ch_ary.astype('float32')
         for n in ch_ary:
-            p_line += ' ' + unicode(float(n)/255)
+            p_line += ' ' + unicode(float(n) / 255)
         fout.write(p_line + '\n')
     fout.close()
 
 
 def read_chars_pixels(path, font_name, pt_size):
     pix_dic = []
-    for line in codecs.open(path + '/' + font_name + str(pt_size) +  '_pixels.txt', 'rb', encoding='utf-8'):
+    for line in codecs.open(path + '/' + font_name + str(pt_size) + '_pixels.txt', 'rb', encoding='utf-8'):
         line = line.strip()
         sets = line.split(' ')
         ch_ary = np.array(sets[1:], dtype='float32')
@@ -489,7 +494,7 @@ def get_new_pixels(new_chars, font, pt_size):
         if ch_ary.shape[0] < pt_size:
             ch_ary = np.pad(ch_ary, ((pt_size - ch_ary.shape[0], 0), (0, 0)), 'constant', constant_values=0)
         ch_ary = ch_ary.flatten()
-        new_pixels.append(np.asarray(ch_ary, dtype='float32')/255)
+        new_pixels.append(np.asarray(ch_ary, dtype='float32') / 255)
     return new_pixels
 
 
@@ -544,25 +549,28 @@ def get_comb_tags(tags, tag_type):
     return tag2index
 
 
-def get_dic(chars, tags):
-    char2index = {}
-    char2index['<P>'] = 0
-    char2index['<UNK>'] = 1
-    char2index['<NUM>'] = 2
-    char2index['<FW>'] = 3
+def get_dic(chars, tags, char_freq=False):
+    char2index = {'<P>': 0, '<UNK>': 1, '<NUM>': 2, '<FW>': 3}
+    char2freq = {'<P>': 0, '<UNK>': 0, '<NUM>': 0, '<FW>': 0}
     idx = 4
-    for ch in chars:
+    for ch, freq in chars:
         char2index[ch] = idx
+        char2freq[ch] = float(freq)
         idx += 1
     index2char = {v: k for k, v in char2index.items()}
 
-    #0.seg BIES  1. BI; 2. BIE; 3. BIES
-    seg_tags2index = {'<P>':0, 'B': 1, 'I': 2, 'E': 3, 'S': 4}
-    tag2index = {'seg': seg_tags2index, 'BI': get_comb_tags(tags, 'BI'), 'BIE': get_comb_tags(tags, 'BIE'), 'BIES': get_comb_tags(tags, 'BIES')}
+    # 0.seg BIES  1. BI; 2. BIE; 3. BIES
+    seg_tags2index = {'<P>': 0, 'B': 1, 'I': 2, 'E': 3, 'S': 4}
+    tag2index = {'seg': seg_tags2index, 'BI': get_comb_tags(tags, 'BI'), 'BIE': get_comb_tags(tags, 'BIE'),
+                 'BIES': get_comb_tags(tags, 'BIES')}
     index2tag = {}
     for dic_keys in tag2index:
         index2tag[dic_keys] = {v: k for k, v in tag2index[dic_keys].items()}
-    return char2index, index2char, tag2index, index2tag
+
+    if not char_freq:
+        char2freq = None
+    return char2index, index2char, char2freq, tag2index, index2tag
+
 
 # 将 ngram 映射成对应的数字序号
 # 输入是二维数组 [[2grams],[3grams],......]
@@ -610,31 +618,27 @@ def sub_num(x, char2index):
     return x
 
 
-def get_input_vec(path, fname, char2index, tag2index, rad_dic=None, tag_scheme='BIES'):
+def get_input_vec(path, fname, char2index, tag2index, char2freq=None, tag_scheme='BIES'):
     max_sent_len_c = 0
     max_sent_len_w = 0
     max_word_len = 0
     t_len = 0
     key_map = {}
     keys = []
-    if rad_dic is None:
+    if char2freq is None:
         x_m = [[]]
     else:
         x_m = [[], []]
-        keys = sorted(rad_dic.keys())
-        key_map['<NULL>'] = 0
-        idx = 1
-        for k in keys:
-            key_map[k] = idx
-            idx += 1
 
     y_m = [[]]
+
 
     for line in codecs.open(path + '/' + fname, 'r', encoding='utf-8'):
         charIndices = []
         raw_l = ''
-        if rad_dic is not None:
-            radIndices = []
+        if char2freq is not None:
+            freqs = []
+
 
         tagIndices = {}
 
@@ -660,9 +664,11 @@ def get_input_vec(path, fname, char2index, tag2index, rad_dic=None, tag_scheme='
                 t_len += w_len
 
                 if w_len == 1:
+
                     charIndices.append(char2index[splits[0]])
-                    if rad_dic is not None:
-                        radIndices.append(key_map[get_radical_idx(splits[0], rad_dic, keys)])
+
+                    if char2freq is not None:
+                        freqs.append(char2freq[splits[0]])
 
                     tagIndices['seg'].append(tag2index['seg']['S'])
                     tagIndices['BI'].append(tag2index['BI']['B-' + splits[1]])
@@ -675,8 +681,9 @@ def get_input_vec(path, fname, char2index, tag2index, rad_dic=None, tag_scheme='
                         c_ch = splits[0][x]
                         charIndices.append(char2index[c_ch])
 
-                        if rad_dic is not None:
-                            radIndices.append(key_map[get_radical_idx(c_ch, rad_dic, keys)])
+
+                        if char2freq is not None:
+                            freqs.append(char2freq[c_ch])
 
                         if x == 0:
 
@@ -706,8 +713,8 @@ def get_input_vec(path, fname, char2index, tag2index, rad_dic=None, tag_scheme='
                 max_sent_len_c = t_len
             t_len = 0
             x_m[0].append(charIndices)
-            if rad_dic is not None:
-                x_m[1].append(radIndices)
+            if char2freq is not None:
+                x_m[1].append(freqs)
 
             y_m[0].append(tagIndices[tag_scheme])
     return x_m, y_m, max_sent_len_c, max_sent_len_w, max_word_len
@@ -716,7 +723,7 @@ def get_input_vec(path, fname, char2index, tag2index, rad_dic=None, tag_scheme='
 def gram_vec(raw, dic):
     out = []
     ngram = len(dic.keys()[0])
-    li = ngram/2
+    li = ngram / 2
     ri = ngram - li - 1
     p = '<PAD>'
     for line in raw:
@@ -727,9 +734,9 @@ def gram_vec(raw, dic):
             else:
                 lp = line[i - li:i]
             if i + ri + 1 > len(line):
-                rp = line[i:] + p*(i + ri + 1 - len(line))
+                rp = line[i:] + p * (i + ri + 1 - len(line))
             else:
-                rp = line[i:i+ri+1]
+                rp = line[i:i + ri + 1]
             ch = lp + rp
             if ch in dic:
                 indices.append(dic[ch])
@@ -737,6 +744,7 @@ def gram_vec(raw, dic):
                 indices.append(dic['<UNK>'])
         out.append(indices)
     return out
+
 
 def get_gram_vec(path, fname, gram2index, is_raw=False):
     raw = []
@@ -808,7 +816,6 @@ def get_input_vec_raw(path, fname, char2index, rad_dic=None):
         if rad_dic is not None:
             x_m[1].append(radIndices)
     return x_m, max_len
-
 
 
 def get_input_vec_line(lines, char2index, rad_dic=None):
@@ -965,9 +972,9 @@ def evaluator(prediction, gold, metric='F1-score', tag_num=1, verbose=False):
     scores = (0, 0, 0, 0, 0, 0)
     scores_b = (0, 0, 0, 0, 0, 0)
     if metric in ['F1-score', 'Precision', 'Recall', 'All']:
-        scores = score(gold[0], prediction[0], tag_num,  verbose)
+        scores = score(gold[0], prediction[0], tag_num, verbose)
     if metric in ['Boundary-F1-score', 'All']:
-        scores_b = score_boundaries(gold[0], prediction[0],  verbose)
+        scores_b = score_boundaries(gold[0], prediction[0], verbose)
     return scores + scores_b
 
 
@@ -1132,5 +1139,3 @@ def merge_files(out_path, raw_file, bt_num):
         os.remove(out_path + '_' + str(i))
 
     os.remove(raw_file + '_lidx')
-
-

@@ -47,8 +47,6 @@ parser.add_argument("-tb", "--train_batch", help="Training batch size", default=
 parser.add_argument("-eb", "--test_batch", help="Testing batch size", default=200, type=int)
 parser.add_argument("-rb", "--tag_batch", help="Tagging batch size", default=200, type=int)
 
-parser.add_argument("-g", "--gpu", help="the id of gpu, the default is 0", default=0, type=int)
-
 parser.add_argument('-opth', '--output_path', default=None, help='Output path')
 
 parser.add_argument('-ens', '--ensemble', default=False, help='Ensemble several weights', action='store_true')
@@ -61,10 +59,10 @@ parser.add_argument('-ls', '--large_size', default=200000, type=int, help='Tag (
 
 parser.add_argument('--co_train', action='store_true', default=False, help='cotrain language model')
 parser.add_argument('--lambda0', type=float, default=1, help='language model loss weight')
+parser.add_argument('--lambda1', type=float, default=1, help='char freq loss weight')
 parser.add_argument('--patience', type=int, default=15, help='patience for early stop')
-parser.add_argument('--high_way', action='store_true', help='use highway layers')
 parser.add_argument('--highway_layers', type=int, default=1, help='number of highway layers')
-
+parser.add_argument('--char_freq_loss', action='store_true', default=False, help="use character frequency as auxiliary loss")
 args = parser.parse_args()
 
 sys = reload(sys)
@@ -96,19 +94,19 @@ if args.action == 'train':
         print 'Reading embeddings...'
         short_emb = args.embeddings[args.embeddings.index('/') + 1: args.embeddings.index('.')]
         if not os.path.isfile(path + '/' + short_emb + '_sub.txt'):
-            toolbox.get_sample_embedding(path, args.embeddings, chars)
+            toolbox.get_sample_embedding(path, args.embeddings, map(lambda x: x[0], chars))
         emb_dim, emb = toolbox.read_sample_embedding(path, short_emb)
         assert args.embeddings_dimension == emb_dim
     else:
         print 'Using random embeddings...'
 
-    char2idx, idx2char, tag2idx, idx2tag = toolbox.get_dic(chars, tags)
+    char2idx, idx2char, char2freq, tag2idx, idx2tag = toolbox.get_dic(chars, tags, args.char_freq_loss)
 
     # train_x: shape=(2,句子数量)，2 表示字符本身+偏旁部首
     train_x, train_y, train_max_slen_c, train_max_slen_w, train_max_wlen = \
-        toolbox.get_input_vec(path, train_file, char2idx, tag2idx, tag_scheme=args.tag_scheme)
+        toolbox.get_input_vec(path, train_file, char2idx, tag2idx, char2freq, tag_scheme=args.tag_scheme)
     dev_x, dev_y, dev_max_slen_c, dev_max_slen_w, dev_max_wlen = \
-        toolbox.get_input_vec(path, dev_file, char2idx, tag2idx, tag_scheme=args.tag_scheme)
+        toolbox.get_input_vec(path, dev_file, char2idx, tag2idx, char2freq, tag_scheme=args.tag_scheme)
 
     # 读取 ngram 向量
     nums_grams = None
@@ -141,7 +139,7 @@ if args.action == 'train':
     nums_tags = toolbox.get_nums_tags(tag2idx, args.tag_scheme)
     # 用来对session进行参数配置，allow_soft_placement 表示如果你指定的设备不存在，允许TF自动分配设备
     config = tf.ConfigProto(allow_soft_placement=True)
-    gpu_config = "/gpu:" + str(args.gpu)
+    gpu_config = "/gpu:0"
     print 'Initialization....'
     t = time()
     # Returns an initializer performing "Xavier" initialization for weights.
@@ -159,8 +157,9 @@ if args.action == 'train':
                           batch_size=args.train_batch, metric=args.op_metric,
                           co_train=args.co_train,
                           lambda0=args.lambda0,
-                          highway=args.high_way,
-                          highway_layers=args.highway_layers)
+                          lambda1=args.lambda1,
+                          highway_layers=args.highway_layers,
+                          char_freq_loss = args.char_freq_loss)
             # 构建 graph，即字符输入=>字向量=>BiLSTM=>全连接层的整个模型图
             model.main_graph(trained_model=path + '/' + model_file + '_model', scope=scope, emb_dim=emb_dim,
                              gru=args.gru, rnn_dim=args.rnn_cell_dimension, rnn_num=args.rnn_layer_number,
