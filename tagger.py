@@ -22,6 +22,8 @@ parser.add_argument('-m', '--model', default='trained_model', help='Name of the 
 parser.add_argument('-tg', '--tag_scheme', default='BIES', help='Tagging scheme')
 parser.add_argument('-crf', '--crf', default=1, type=int, help='Using CRF interface')
 
+parser.add_argument('-ng', '--ngram', default=3, type=int, help='Using ngrams')
+parser.add_argument('--ngram_embeddings', default=None, help='Pre-trained ngram embeddings')
 parser.add_argument('-emb', '--embeddings', default=None, help='Path and name of pre-trained char embeddings')
 parser.add_argument('-ed', '--embeddings_dimension', default=64, type=int, help='Dimension of the embeddings')
 
@@ -60,15 +62,18 @@ parser.add_argument('-ls', '--large_size', default=200000, type=int, help='Tag (
 parser.add_argument('--co_train', action='store_true', default=False, help='cotrain language model')
 parser.add_argument('--lambda0', type=float, default=1, help='language model loss weight')
 parser.add_argument('--lambda1', type=float, default=1, help='char freq loss weight')
-parser.add_argument('--patience', type=int, default=15, help='patience for early stop')
+parser.add_argument('--char_freq_loss', action='store_true', default=False,
+                    help="use character frequency as auxiliary loss")
 parser.add_argument('--highway_layers', type=int, default=1, help='number of highway layers')
-parser.add_argument('--char_freq_loss', action='store_true', default=False, help="use character frequency as auxiliary loss")
+
+parser.add_argument('--patience', type=int, default=15, help='patience for early stop')
 args = parser.parse_args()
 
 sys = reload(sys)
 sys.setdefaultencoding('utf-8')
 print 'Encoding: ', sys.getdefaultencoding()
 
+gpu_config = "/gpu:0"
 if args.action == 'train':
     assert args.path is not None
     assert args.train is not None
@@ -80,7 +85,7 @@ if args.action == 'train':
     print 'Reading data......'
 
     # 统计文本信息
-    ngram = 3
+    ngram = args.ngram
     if not os.path.isfile(path + '/' + str(ngram) + 'gram.txt') \
             or (not os.path.isfile(path + '/' + 'chars.txt')):
         toolbox.get_vocab_tag(path, [train_file, dev_file], ngram=ngram)
@@ -111,6 +116,23 @@ if args.action == 'train':
     # 读取 ngram 向量
     nums_grams = None
     ng_embeddings = None
+    if ngram > 1:
+        gram2idx = toolbox.get_ngram_dic(ngram)
+        train_gram = toolbox.get_gram_vec(path, train_file, gram2idx)
+        dev_gram = toolbox.get_gram_vec(path, dev_file, gram2idx)
+        # 这一句后 train_x： shape=(4,句子数量)，因为加了 2gram 和 3gram
+        train_x += train_gram
+        dev_x += dev_gram
+        nums_grams = []
+        for dic in gram2idx:
+            nums_grams.append(len(dic.keys()))
+
+        if args.ngram_embeddings is not None:
+            print 'Reading N-gram Embeddings...'
+            short_ng_emb = args.ngram_embeddings[args.ngram_embeddings.index('/') + 1:]
+            if not os.path.isfile(path + '/' + short_ng_emb + '_' + str(args.ngram) + 'gram_sub.txt'):
+                toolbox.get_ngram_embedding(path, args.ngram_embeddings, ngram)
+            ng_embeddings = toolbox.read_ngram_embedding(path, short_ng_emb, args.ngram)
 
     tag_map = {'seg': 0, 'BI': 1, 'BIE': 2, 'BIES': 3}
 
@@ -139,7 +161,7 @@ if args.action == 'train':
     nums_tags = toolbox.get_nums_tags(tag2idx, args.tag_scheme)
     # 用来对session进行参数配置，allow_soft_placement 表示如果你指定的设备不存在，允许TF自动分配设备
     config = tf.ConfigProto(allow_soft_placement=True)
-    gpu_config = "/gpu:0"
+
     print 'Initialization....'
     t = time()
     # Returns an initializer performing "Xavier" initialization for weights.
@@ -154,16 +176,17 @@ if args.action == 'train':
                           nums_tags=nums_tags, buckets_char=b_buckets, counts=b_counts,
                           tag_scheme=args.tag_scheme,
                           crf=args.crf,
+                          ngram=nums_grams,
                           batch_size=args.train_batch, metric=args.op_metric,
                           co_train=args.co_train,
                           lambda0=args.lambda0,
                           lambda1=args.lambda1,
                           highway_layers=args.highway_layers,
-                          char_freq_loss = args.char_freq_loss)
+                          char_freq_loss=args.char_freq_loss)
             # 构建 graph，即字符输入=>字向量=>BiLSTM=>全连接层的整个模型图
             model.main_graph(trained_model=path + '/' + model_file + '_model', scope=scope, emb_dim=emb_dim,
                              gru=args.gru, rnn_dim=args.rnn_cell_dimension, rnn_num=args.rnn_layer_number,
-                             emb=emb, drop_out=args.dropout_rate)
+                             emb=emb, drop_out=args.dropout_rate, ngram_embedding=ng_embeddings)
         t = time()
         # 根据指定参数策略计算损失函数，计算梯度，应用梯度下降
         model.config(optimizer=args.optimizer, decay=args.decay_rate,
@@ -208,6 +231,7 @@ else:
 
     model_file = args.model
     emb_path = args.embeddings
+    ng_emb_path = args.ngram_embeddings
 
     if args.ensemble:
         if not os.path.isfile(path + '/' + model_file + '_1_model') or not os.path.isfile(
@@ -235,12 +259,15 @@ else:
     rnn_num = param_dic['rnn_num']
     drop_out = param_dic['drop_out']
     buckets_char = param_dic['buckets_char']
+    num_ngram = param_dic['ngram']
 
     ngram = 1
     gram2idx = None
+    if num_ngram is not None:
+        ngram = len(num_ngram) + 1
 
     chars, tags, grams = toolbox.read_vocab_tag(path, ngram)
-    char2idx, idx2char, tag2idx, idx2tag = toolbox.get_dic(chars, tags)
+    char2idx, idx2char, char2freq, tag2idx, idx2tag = toolbox.get_dic(chars, tags)
 
     new_chars, new_grams, new_gram_emb, gram2idx = None, None, None, None
 
@@ -253,8 +280,6 @@ else:
     unk_char2idx = None
 
     max_step = None
-
-    s_time = None
 
     s_time = time()
     if args.action == 'test':
@@ -281,6 +306,16 @@ else:
         print 'Longest sentence by word is %d. ' % test_max_slen_w
 
         print 'Longest word is %d. ' % test_max_wlen
+
+        if ngram > 1:
+            gram2idx = toolbox.get_ngram_dic(grams)
+            new_grams = toolbox.get_new_grams(path + '/' + test_file, gram2idx)
+            if args.ngram_embeddings is not None:
+                new_grams = toolbox.get_valid_grams(new_grams, args.ngram_embeddings)
+                gram2idx = toolbox.update_gram_dicts(gram2idx, new_grams)
+
+            test_gram = toolbox.get_gram_vec(path, test_file, gram2idx)
+            test_x += test_gram
 
         for k in range(len(test_x)):
             test_x[k] = toolbox.pad_zeros(test_x[k], max_step)
@@ -311,13 +346,25 @@ else:
             max_step = toolbox.get_maxstep(raw_file, args.bucket_size)
 
         print 'Longest sentence is %d. ' % max_step
+        if ngram > 1:
+
+            gram2idx = toolbox.get_ngram_dic(grams)
+
+            if args.ngram_embeddings is not None:
+                new_grams = toolbox.get_new_grams(raw_file, gram2idx, type='raw')
+                new_grams = toolbox.get_valid_grams(new_grams, args.ngram_embeddings)
+                gram2idx = toolbox.update_gram_dicts(gram2idx, new_grams)
+
+            if not args.tag_large:
+
+                raw_gram = toolbox.get_gram_vec(None, raw_file, gram2idx, is_raw=True)
+                raw_x += raw_gram
 
         if not args.tag_large:
             for k in range(len(raw_x)):
                 raw_x[k] = toolbox.pad_zeros(raw_x[k], max_step)
 
     config = tf.ConfigProto(allow_soft_placement=True)
-    gpu_config = "/device:GPU:" + str(args.gpu)
     print 'Initialization....'
     t = time()
     main_graph = tf.Graph()
@@ -326,7 +373,7 @@ else:
         with tf.variable_scope("tagger") as scope:
             if args.action == 'test' or (args.action == 'tag' and not args.tag_large):
                 model = Model(nums_chars=nums_chars, nums_tags=nums_tags, buckets_char=[max_step], counts=[200],
-                              batch_size=args.tag_batch, tag_scheme=tag_scheme, crf=crf)
+                              batch_size=args.tag_batch, tag_scheme=tag_scheme, crf=crf, ngram=num_ngram)
             else:
                 bt_chars = []
                 bt_len = args.bucket_size
@@ -338,10 +385,12 @@ else:
                     bt_chars.append(max_step)
                 bt_counts = [200] * len(bt_chars)
                 model = Model(nums_chars=nums_chars, nums_tags=nums_tags, buckets_char=bt_chars, counts=bt_counts,
-                              batch_size=args.tag_batch, tag_scheme=tag_scheme, crf=crf)
+                              batch_size=args.tag_batch, tag_scheme=tag_scheme, crf=crf, ngram=num_ngram)
             model.main_graph(trained_model=None, scope=scope, emb_dim=emb_dim, gru=gru, rnn_dim=rnn_dim,
                              rnn_num=rnn_num, drop_out=drop_out)
-        model.define_updates(new_chars=new_chars, emb_path=emb_path, char2idx=char2idx)
+        model.define_updates(new_chars=new_chars, emb_path=emb_path, char2idx=char2idx, new_grams=new_grams,
+                             ng_emb_path=ng_emb_path, gram2idx=gram2idx)
+
         init = tf.global_variables_initializer()
 
         print 'Done. Time consumed: %d seconds' % int(time() - t)

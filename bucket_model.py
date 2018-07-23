@@ -16,8 +16,11 @@ from my.tensorflow.nn import highway_network
 
 class Model(object):
     def __init__(self, nums_chars, nums_tags, buckets_char, counts=None, batch_size=10, tag_scheme='BIES', crf=1,
-                 metric='F1-score', co_train=False, highway_layers=1, lambda0=0, lambda1=0,
+                 metric='F1-score', ngram=None, co_train=False, highway_layers=1, lambda0=0, lambda1=0,
                  char_freq_loss=False):
+        self.ngram = ngram
+        self.gram_layers = []
+
         # 字符种类数目
         self.nums_chars = nums_chars
         # 标签种类数目，例如[18]，至于为什么要用数组多此一举不清楚
@@ -93,7 +96,8 @@ class Model(object):
         self.real_batches = toolbox.get_real_batch(self.counts, self.batch_size)
         self.losses = []
 
-    def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, emb=None):
+    def main_graph(self, trained_model, scope, emb_dim, gru, rnn_dim, rnn_num, drop_out=0.5, emb=None,
+                   ngram_embedding=None):
         """
         :param trained_model:
         :param scope:
@@ -111,6 +115,7 @@ class Model(object):
                          'crf': self.crf, 'emb_dim': emb_dim, 'gru': gru, 'rnn_dim': rnn_dim,
                          'rnn_num': rnn_num, 'drop_out': drop_out,
                          'buckets_char': self.buckets_char,
+                         'ngram': self.ngram
                          }
             print "RNN dimension is %d" % rnn_dim
             print "RNN number is %d" % rnn_num
@@ -140,6 +145,15 @@ class Model(object):
         # emb_dim 是每个字符的特征向量维度，可以通过命令行参数设置
         # weights 表示预训练的字向量，可以通过命令行参数设置
         self.emb_layer = EmbeddingLayer(self.nums_chars + 500, emb_dim, weights=emb, name='emb_layer')
+
+        if self.ngram is not None:
+            if ngram_embedding is not None:
+                assert len(ngram_embedding) == len(self.ngram)
+            else:
+                ngram_embedding = [None for _ in range(len(self.ngram))]
+            for i, n_gram in enumerate(self.ngram):
+                self.gram_layers.append(EmbeddingLayer(n_gram + 1000 * (i + 2), emb_dim, weights=ngram_embedding[i],
+                                                       name=str(i + 2) + 'gram_layer'))
 
         # 隐藏层，输入是前向 RNN 的输出加上 后向 RNN 的输出，所以输入维度为 rnn_dim * 2
         # 输出维度即标签个数
@@ -176,9 +190,24 @@ class Model(object):
 
             self.input_v.append([input_sentences])
 
-            # 根据 one-hot 向量查找对应的字向量
-            # word_out: shape=(batch_size, 句子长度，字向量维度（64）)
-            word_embeddings = self.emb_layer(input_sentences)
+            emb_set = []
+            word_out = self.emb_layer(input_sentences)
+            emb_set.append(word_out)
+
+            if self.ngram is not None:
+                for i in range(len(self.ngram)):
+                    input_g = tf.placeholder(tf.int32, [None, bucket], name='input_g' + str(i) + str(bucket))
+                    self.input_v[-1].append(input_g)
+                    gram_out = self.gram_layers[i](input_g)
+                    emb_set.append(gram_out)
+
+            if len(emb_set) > 1:
+                # 各种字向量直接 concat 起来（字向量、偏旁部首、n-gram、图像信息等）
+                word_embeddings = tf.concat(axis=2, values=emb_set)
+
+            else:
+                word_embeddings = emb_set[0]
+
             # rnn_out 是前向 RNN 的输出和后向 RNN 的输出 concat 之后的值
             rnn_out_fw, rnn_out_bw = BiRNN(rnn_dim, p=dr, concat_output=False, gru=gru,
                                            name='BiLSTM' + str(bucket), scope='Tag-BiRNN')(word_embeddings,
@@ -273,13 +302,15 @@ class Model(object):
 
                 if self.co_train:
                     lm_loss = []
-                    masks = tf.cast(tf.sign(self.output_[i]), dtype=tf.float32)
+                    masks = tf.reshape(tf.cast(tf.sign(self.output_[i]), dtype=tf.float32), shape=[-1, self.buckets_char[i]])
                     for lm_fw_y, lm_fw_y_, lm_bw_y, lm_bw_y_ in zip(self.lm_fw_predictions[i],
                                                                     self.lm_fw_groundtruthes[i],
                                                                     self.lm_bw_predictions[i],
                                                                     self.lm_bw_groundtruthes[i]):
-                        lm_fw_loss = tf.reduce_sum(losses.sparse_cross_entropy(lm_fw_y, lm_fw_y_) * masks)
-                        lm_bw_loss = tf.reduce_sum(losses.sparse_cross_entropy(lm_bw_y, lm_bw_y_) * masks)
+                        lm_fw_loss = tf.contrib.seq2seq.sequence_loss(lm_fw_y, lm_fw_y_, masks)
+                        lm_bw_loss = tf.contrib.seq2seq.sequence_loss(lm_bw_y, lm_bw_y_, masks)
+                        # lm_fw_loss = tf.reduce_sum(losses.sparse_cross_entropy(lm_fw_y, lm_fw_y_) * masks)
+                        # lm_bw_loss = tf.reduce_sum(losses.sparse_cross_entropy(lm_bw_y, lm_bw_y_) * masks)
                         lm_loss.append(lm_fw_loss + lm_bw_loss)
                     lm_loss = tf.stack(lm_loss)
                     lm_loss_summary = tf.summary.scalar('language model loss %s' % i, tf.reduce_mean(lm_loss))
@@ -290,7 +321,8 @@ class Model(object):
                     freq_loss = []
                     masks = tf.cast(tf.sign(self.output_[i]), dtype=tf.float32)
                     for freq_y, freq_y_ in zip(self.char_freq_predictions[i], self.char_freq_groundtruthes[i]):
-                        freq_loss.append(tf.losses.mean_squared_error(freq_y_, tf.reshape(freq_y, tf.shape(freq_y_)), weights=tf.reshape(masks, tf.shape(freq_y_))))
+                        freq_loss.append(tf.losses.mean_squared_error(freq_y_, tf.reshape(freq_y, tf.shape(freq_y_)),
+                                                                      weights=tf.reshape(masks, tf.shape(freq_y_))))
                     freq_loss = tf.stack(freq_loss)
                     freq_loss_summary = tf.summary.scalar('char freq loss %s' % i, tf.reduce_mean(freq_loss))
                     loss += self.lambda1 * freq_loss
@@ -561,11 +593,11 @@ class Model(object):
             print 'Best POS Tagging ' + metric + ': %f' % best_pos[metric]
             print 'Best epoch: %d\n' % best_epoch[metric]
 
-    def define_updates(self, new_chars, emb_path, char2idx):
+    def define_updates(self, new_chars, emb_path, char2idx, new_grams=None, ng_emb_path=None, gram2idx=None):
 
         self.nums_chars += len(new_chars)
 
-        if self.word_vec and emb_path is not None:
+        if emb_path is not None:
 
             old_emb_weights = self.emb_layer.embeddings
             emb_dim = old_emb_weights.get_shape().as_list()[1]
@@ -578,6 +610,16 @@ class Model(object):
                 if new_emb_weights.get_shape().as_list()[0] > emb_len:
                     new_emb_weights = new_emb_weights[:emb_len]
                 assign_op = old_emb_weights.assign(new_emb_weights)
+                self.updates.append(assign_op)
+
+        if self.ngram is not None and ng_emb_path is not None:
+            old_gram_weights = [ng_layer.embeddings for ng_layer in self.gram_layers]
+            ng_emb_dim = old_gram_weights[0].get_shape().as_list()[1]
+            new_ng_emb = toolbox.get_new_ng_embeddings(new_grams, ng_emb_dim, ng_emb_path)
+            for i in range(len(old_gram_weights)):
+                new_ng_weight = tf.concat(axis=0, values=[old_gram_weights[i][:len(gram2idx[i]) - len(new_grams[i])],
+                                                          new_ng_emb[i], old_gram_weights[i][len(gram2idx[i]):]])
+                assign_op = old_gram_weights[i].assign(new_ng_weight)
                 self.updates.append(assign_op)
 
     def run_updates(self, sess, weight_path):
@@ -671,6 +713,7 @@ class Model(object):
                                         data=data, dr=self.drop_out, ensemble=ensemble,
                                         verbose=verbose)
         else:
-            predictions = Batch.predict(sess=sess[0], placeholders=placeholders, crf=self.crf, argmax=argmax, batch_size=batch_size,
+            predictions = Batch.predict(sess=sess[0], placeholders=placeholders, crf=self.crf, argmax=argmax,
+                                        batch_size=batch_size,
                                         data=data, dr=self.drop_out, ensemble=ensemble, verbose=verbose)
         return predictions
